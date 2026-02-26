@@ -199,18 +199,33 @@ async function handleOrderSubmit(e) {
 }
 
 function toggleBot() {
+    const btn = elements.startBotBtn;
     if (state.aiStatus === 'idle') {
-        state.aiStatus = 'running';
-        elements.startBotBtn.innerHTML = '⏸ Stop Bot';
-        elements.startBotBtn.classList.remove('btn-primary');
-        elements.startBotBtn.classList.add('btn-secondary');
-        showNotification('AI Bot started', 'success');
+        // Start bot
+        fetch('/api/bot/start', { method: 'POST' })
+            .then(r => r.json())
+            .then(result => {
+                if (result.status === 'ok') {
+                    state.aiStatus = 'running';
+                    btn.innerHTML = '⏸ Stop Bot';
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-secondary');
+                    showNotification('AI Bot started - Automated trading active!', 'success');
+                }
+            });
     } else {
-        state.aiStatus = 'idle';
-        elements.startBotBtn.innerHTML = '▶ Start Bot';
-        elements.startBotBtn.classList.remove('btn-secondary');
-        elements.startBotBtn.classList.add('btn-primary');
-        showNotification('AI Bot stopped', 'info');
+        // Stop bot
+        fetch('/api/bot/stop', { method: 'POST' })
+            .then(r => r.json())
+            .then(result => {
+                if (result.status === 'ok') {
+                    state.aiStatus = 'idle';
+                    btn.innerHTML = '▶ Start Bot';
+                    btn.classList.remove('btn-secondary');
+                    btn.classList.add('btn-primary');
+                    showNotification('AI Bot stopped', 'info');
+                }
+            });
     }
 }
 
