@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Crypto Trading Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">🤖</div>
+                <span>AI Trader</span>
+            </div>
+            
+            <nav class="nav">
+                <a href="#" class="nav-item active" data-tab="dashboard">
+                    <span class="nav-icon">📊</span>
+                    Dashboard
+                </a>
+                <a href="#" class="nav-item" data-tab="trading">
+                    <span class="nav-icon">💹</span>
+                    Trading
+                </a>
+                <a href="#" class="nav-item" data-tab="ai-models">
+                    <span class="nav-icon">🧠</span>
+                    AI Models
+                </a>
+                <a href="#" class="nav-item" data-tab="analytics">
+                    <span class="nav-icon">📈</span>
+                    Analytics
+                </a>
+                <a href="#" class="nav-item" data-tab="settings">
+                    <span class="nav-icon">⚙️</span>
+                    Settings
+                </a>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="connection-status">
+                    <span class="status-dot online"></span>
+                    Connected
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Header -->
+            <header class="header">
+                <h1>Dashboard</h1>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" id="paper-mode-btn">
+                        📝 Paper Trading
+                    </button>
+                    <button class="btn btn-primary" id="start-bot-btn">
+                        ▶ Start Bot
+                    </button>
+                </div>
+            </header>
+
+            <!-- Dashboard Tab -->
+            <div class="tab-content active" id="dashboard-tab">
+                <!-- Stats Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Equity</div>
+                        <div class="stat-value" id="equity">$10,000.00</div>
+                        <div class="stat-change positive" id="equity-change">+0.00%</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total P&L</div>
+                        <div class="stat-value" id="pnl">$0.00</div>
+                        <div class="stat-change positive" id="pnl-change">+0.00%</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Active Positions</div>
+                        <div class="stat-value" id="positions">0</div>
+                        <div class="stat-change neutral">Open</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Win Rate</div>
+                        <div class="stat-value" id="win-rate">0%</div>
+                        <div class="stat-change neutral" id="trades-count">0 trades</div>
+                    </div>
+                </div>
+
+                <!-- Prices & Chart -->
+                <div class="dashboard-grid">
+                    <!-- Live Prices -->
+                    <div class="card prices-card">
+                        <div class="card-header">
+                            <h3>Live Prices</h3>
+                            <span class="live-indicator">● LIVE</span>
+                        </div>
+                        <div class="prices-list" id="prices-list">
+                            <!-- Prices injected by JS -->
+                        </div>
+                    </div>
+
+                    <!-- TradingView Chart -->
+                    <div class="card chart-card">
+                        <div class="card-header">
+                            <h3>Market Chart</h3>
+                            <select id="chart-symbol">
+                                <option value="BTCUSDT">BTC/USDT</option>
+                                <option value="ETHUSDT">ETH/USDT</option>
+                                <option value="SOLUSDT">SOL/USDT</option>
+                                <option value="XRPUSDT">XRP/USDT</option>
+                            </select>
+                        </div>
+                        <div class="chart-container">
+                            <iframe id="tradingview-chart" 
+                                src="https://www.tradingview.com/widgetembed/?frameElementId=tradingview_chart&symbol=BINANCE:BTCUSDT&interval=15&theme=dark&style=1&locale=en&toolbar_bg=f1f3f6&enable_publishing=false&hide_top_toolbar=false&hide_legend=false&save_image=false&calendar=false&hide_volume=false"
+                                width="100%" height="400" frameborder="0" allowtransparency="true" scrolling="no">
+                            </iframe>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Trades -->
+                <div class="card trades-card">
+                    <div class="card-header">
+                        <h3>Recent Trades</h3>
+                        <button class="btn btn-sm btn-secondary">View All</button>
+                    </div>
+                    <table class="trades-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Entry</th>
+                                <th>Exit</th>
+                                <th>P&L</th>
+                                <th>AI Model</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-tbody">
+                            <!-- Trades injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Trading Tab -->
+            <div class="tab-content" id="trading-tab">
+                <div class="trading-layout">
+                    <div class="card order-card">
+                        <div class="card-header">
+                            <h3>Manual Order</h3>
+                        </div>
+                        <form class="order-form" id="order-form">
+                            <div class="form-group">
+                                <label>Symbol</label>
+                                <select id="order-symbol">
+                                    <option value="BTCUSDT">BTC/USDT</option>
+                                    <option value="ETHUSDT">ETH/USDT</option>
+                                    <option value="SOLUSDT">SOL/USDT</option>
+                                    <option value="XRPUSDT">XRP/USDT</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Side</label>
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-long active" data-side="buy">LONG</button>
+                                    <button type="button" class="btn btn-short" data-side="sell">SHORT</button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Amount (USDT)</label>
+                                <input type="number" id="order-amount" placeholder="100" min="10">
+                            </div>
+                            <div class="form-group">
+                                <label>Leverage</label>
+                                <select id="order-leverage">
+                                    <option value="1">1x</option>
+                                    <option value="3">3x</option>
+                                    <option value="5">5x</option>
+                                    <option value="10">10x</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">Place Order</button>
+                        </form>
+                    </div>
+
+                    <div class="card positions-card">
+                        <div class="card-header">
+                            <h3>Open Positions</h3>
+                        </div>
+                        <div id="positions-list">
+                            <div class="empty-state">No open positions</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Models Tab -->
+            <div class="tab-content" id="ai-models-tab">
+                <div class="models-grid">
+                    <div class="model-card" data-model="gpt-4">
+                        <div class="model-header">
+                            <div class="model-icon">🧠</div>
+                            <div class="model-info">
+                                <h4>GPT-4 Turbo</h4>
+                                <span class="model-provider">OpenAI</span>
+                            </div>
+                            <div class="model-status active">Active</div>
+                        </div>
+                        <div class="model-stats">
+                            <div class="model-stat">
+                                <span class="stat-label">Win Rate</span>
+                                <span class="stat-value">68.5%</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Total P&L</span>
+                                <span class="stat-value positive">+$1,245</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Trades</span>
+                                <span class="stat-value">47</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-block select-model-btn" data-model="gpt-4">Select Model</button>
+                    </div>
+
+                    <div class="model-card" data-model="claude">
+                        <div class="model-header">
+                            <div class="model-icon">🎯</div>
+                            <div class="model-info">
+                                <h4>Claude 3.5</h4>
+                                <span class="model-provider">Anthropic</span>
+                            </div>
+                            <div class="model-status">Available</div>
+                        </div>
+                        <div class="model-stats">
+                            <div class="model-stat">
+                                <span class="stat-label">Win Rate</span>
+                                <span class="stat-value">72.3%</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Total P&L</span>
+                                <span class="stat-value positive">+$1,892</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Trades</span>
+                                <span class="stat-value">38</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary btn-block select-model-btn" data-model="claude">Select Model</button>
+                    </div>
+
+                    <div class="model-card" data-model="deepseek">
+                        <div class="model-header">
+                            <div class="model-icon">🔮</div>
+                            <div class="model-info">
+                                <h4>DeepSeek V3</h4>
+                                <span class="model-provider">DeepSeek</span>
+                            </div>
+                            <div class="model-status">Available</div>
+                        </div>
+                        <div class="model-stats">
+                            <div class="model-stat">
+                                <span class="stat-label">Win Rate</span>
+                                <span class="stat-value">65.1%</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Total P&L</span>
+                                <span class="stat-value positive">+$987</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Trades</span>
+                                <span class="stat-value">52</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary btn-block select-model-btn" data-model="deepseek">Select Model</button>
+                    </div>
+
+                    <div class="model-card" data-model="qwen">
+                        <div class="model-header">
+                            <div class="model-icon">⚡</div>
+                            <div class="model-info">
+                                <h4>Qwen 3 Max</h4>
+                                <span class="model-provider">Alibaba</span>
+                            </div>
+                            <div class="model-status">Available</div>
+                        </div>
+                        <div class="model-stats">
+                            <div class="model-stat">
+                                <span class="stat-label">Win Rate</span>
+                                <span class="stat-value">71.8%</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Total P&L</span>
+                                <span class="stat-value positive">+$2,156</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="stat-label">Trades</span>
+                                <span class="stat-value">41</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary btn-block select-model-btn" data-model="qwen">Select Model</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div class="tab-content" id="analytics-tab">
+                <div class="analytics-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Performance Overview</h3>
+                        </div>
+                        <div class="chart-placeholder">
+                            <div class="placeholder-text">Performance chart will be displayed here</div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Trade Distribution</h3>
+                        </div>
+                        <div class="chart-placeholder">
+                            <div class="placeholder-text">Distribution chart will be displayed here</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div class="tab-content" id="settings-tab">
+                <div class="settings-layout">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h3>Trading Settings</h3>
+                        </div>
+                        <div class="settings-form">
+                            <div class="form-group">
+                                <label>Trading Mode</label>
+                                <select id="trading-mode">
+                                    <option value="paper">Paper Trading</option>
+                                    <option value="live">Live Trading</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Max Position Size (USDT)</label>
+                                <input type="number" value="1000" min="100">
+                            </div>
+                            <div class="form-group">
+                                <label>Daily Loss Limit (%)</label>
+                                <input type="number" value="5" min="1" max="50">
+                            </div>
+                            <div class="form-group">
+                                <label>Take Profit (%)</label>
+                                <input type="number" value="10" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Stop Loss (%)</label>
+                                <input type="number" value="5" min="1">
+                            </div>
+                            <button class="btn btn-primary">Save Settings</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>

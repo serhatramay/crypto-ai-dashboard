@@ -1,0 +1,10 @@
+{
+  "name": "crypto-ai-dashboard",
+  "version": "1.0.0",
+  "description": "AI Crypto Trading Dashboard",
+  "main": "server.py",
+  "scripts": {
+    "start": "python3 server.py"
+  },
+  "dependencies": {}
+}
