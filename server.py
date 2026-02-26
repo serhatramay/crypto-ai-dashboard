@@ -23,10 +23,10 @@ TR_TZ = timezone(timedelta(hours=3))
 
 # AI Trading Configuration
 AI_CONFIG = {
-    "max_positions": 3,  # Max concurrent positions
-    "trade_amount": 100,  # USDT per trade
+    "max_positions": 3,
+    "trade_amount": 100,
     "leverage": 2,
-    "check_interval": 60,  # Check every 60 seconds
+    "check_interval": 60,
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
 }
@@ -43,7 +43,6 @@ class AITradingBot:
         change = price_data.get('change', 0)
         price = price_data.get('price', 0)
         
-        # Simple strategy based on price change
         if change > 2:
             return "buy", f"Strong upward momentum (+{change:.2f}%)"
         elif change < -2:
@@ -56,58 +55,41 @@ class AITradingBot:
             return "hold", f"Sideways movement ({change:.2f}%)"
     
     def should_open_position(self, symbol, signal):
-        """Check if we should open a position"""
-        # Check max positions
         if len(self.state.positions) >= AI_CONFIG["max_positions"]:
             return False
-        
-        # Check if already have position for this symbol
         for pos in self.state.positions:
             if pos['symbol'] == symbol:
                 return False
-        
-        # Check signal
         return signal in ["buy", "sell"]
     
     def should_close_position(self, position):
-        """Check if we should close a position"""
         pnl_pct = (position['pnl'] / position['margin']) * 100
-        
-        # Stop loss
         if pnl_pct <= -AI_CONFIG["stop_loss_pct"]:
             return True, "Stop loss triggered"
-        
-        # Take profit
         if pnl_pct >= AI_CONFIG["take_profit_pct"]:
             return True, "Take profit triggered"
-        
         return False, None
     
     def run(self):
-        """Main bot loop"""
         print("[AI Bot] Starting automated trading...")
         self.running = True
         
         while self.running:
             try:
-                # Update prices first
                 self.state.update_prices()
                 
-                # Check existing positions for close signals
                 positions_to_close = []
                 for pos in self.state.positions:
                     should_close, reason = self.should_close_position(pos)
                     if should_close:
                         positions_to_close.append((pos['id'], reason))
                 
-                # Close positions
                 for pos_id, reason in positions_to_close:
                     result = self.state.close_position(pos_id)
                     if result.get('status') == 'ok':
                         trade = result['trade']
-                        print(f"[AI Bot] Closed position: {trade['symbol']} {trade['side']} | PnL: ${trade['pnl']:.2f} | Reason: {reason}")
+                        print(f"[AI Bot] Closed: {trade['symbol']} | PnL: ${trade['pnl']:.2f} | {reason}")
                 
-                # Analyze each symbol for new positions
                 symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
                 for symbol in symbols:
                     price_data = self.state.prices.get(symbol)
@@ -121,9 +103,8 @@ class AITradingBot:
                         "time": datetime.now(TR_TZ).strftime("%H:%M:%S")
                     }
                     
-                    # Open position if signal is strong
                     if self.should_open_position(symbol, signal):
-                        side = signal  # buy or sell
+                        side = signal
                         result = self.state.open_position(
                             symbol=symbol,
                             side=side,
@@ -133,9 +114,8 @@ class AITradingBot:
                         
                         if result.get('status') == 'ok':
                             pos = result['position']
-                            print(f"[AI Bot] Opened position: {pos['symbol']} {pos['side']} | Entry: ${pos['entry']:.2f} | Reason: {reason}")
+                            print(f"[AI Bot] Opened: {pos['symbol']} {pos['side']} | Entry: ${pos['entry']:.2f}")
                 
-                # Wait before next check
                 time.sleep(AI_CONFIG["check_interval"])
                 
             except Exception as e:
@@ -143,7 +123,6 @@ class AITradingBot:
                 time.sleep(10)
     
     def start(self):
-        """Start the bot in a separate thread"""
         if not self.running:
             self.state.ai_status = "running"
             self.thread = threading.Thread(target=self.run, daemon=True)
@@ -152,12 +131,10 @@ class AITradingBot:
         return False
     
     def stop(self):
-        """Stop the bot"""
         self.running = False
         self.state.ai_status = "idle"
         return True
 
-# Global state
 class PaperTradingState:
     def __init__(self):
         self.balance = 10000.0
