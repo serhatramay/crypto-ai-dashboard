@@ -346,11 +346,44 @@ function loadInitialData() {
                 }
             }
             
-            // Update equity and PnL from server
-            if (data.equity) state.equity = data.equity;
-            if (data.pnl) state.pnl = data.pnl;
-            if (data.pnl_pct) state.pnl_pct = data.pnl_pct;
-            updateStats();
+            // Update positions count and render positions
+            if (data.positions) {
+                const positionsCountEl = document.getElementById('positions');
+                if (positionsCountEl) {
+                    positionsCountEl.textContent = data.positions.length;
+                }
+                
+                // Render positions in Trading tab
+                const positionsList = document.getElementById('positions-list');
+                if (positionsList && data.positions.length > 0) {
+                    positionsList.innerHTML = data.positions.map(p => `
+                        <div class="position-item">
+                            <div class="position-header">
+                                <span class="position-symbol">${p.symbol}</span>
+                                <span class="position-side ${p.side}">${p.side.toUpperCase()}</span>
+                            </div>
+                            <div class="position-details">
+                                <div class="position-detail">
+                                    <span class="position-detail-label">Entry</span>
+                                    <span class="position-detail-value">$${p.entry.toFixed(2)}</span>
+                                </div>
+                                <div class="position-detail">
+                                    <span class="position-detail-label">Size</span>
+                                    <span class="position-detail-value">${p.size}</span>
+                                </div>
+                                <div class="position-detail">
+                                    <span class="position-detail-label">Leverage</span>
+                                    <span class="position-detail-value">${p.leverage}x</span>
+                                </div>
+                                <div class="position-detail">
+                                    <span class="position-detail-label">P&L</span>
+                                    <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            }
         })
         .catch(err => console.error('Failed to load initial data:', err));
 }
