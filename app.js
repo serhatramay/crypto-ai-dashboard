@@ -98,8 +98,7 @@ function renderPrices() {
     symbols.forEach(symbol => {
         const data = state.prices[symbol];
         const price = data ? data.price : 0;
-        const prevPrice = data ? data.price * (1 + (Math.random() * 0.02 - 0.01)) : price;
-        const change = price && prevPrice ? ((price - prevPrice) / prevPrice * 100) : 0;
+        const change = data ? data.change : 0;
         const changeClass = change >= 0 ? 'up' : 'down';
         const changeSign = change >= 0 ? '+' : '';
         
@@ -114,7 +113,7 @@ function renderPrices() {
                 </div>
                 <div class="price-value">
                     <div class="price-current">$${price ? price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---'}</div>
-                    <div class="price-change ${changeClass}">${changeSign}${change.toFixed(2)}%</div>
+                    <div class="price-change ${changeClass}">${changeSign}${change ? change.toFixed(2) : '0.00'}%</div>
                 </div>
             </div>
         `;
@@ -269,10 +268,10 @@ async function selectModel(model) {
 
 // Stats & Data
 function updateStats() {
-    // Simulate stats updates
-    const equity = 10000 + (Math.random() * 1000 - 500);
-    const pnl = equity - 10000;
-    const pnlPercent = (pnl / 10000) * 100;
+    // Calculate stats from state
+    const equity = state.equity || 10000;
+    const pnl = state.pnl || 0;
+    const pnlPct = state.pnl_pct || 0;
     
     if (elements.equity) {
         elements.equity.textContent = `$${equity.toFixed(2)}`;
@@ -281,6 +280,13 @@ function updateStats() {
     if (elements.pnl) {
         elements.pnl.textContent = `${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}`;
         elements.pnl.className = 'stat-value ' + (pnl >= 0 ? 'positive' : 'negative');
+    }
+    
+    // Update P&L percentage
+    const pnlChangeEl = document.getElementById('pnl-change');
+    if (pnlChangeEl) {
+        pnlChangeEl.textContent = `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`;
+        pnlChangeEl.className = 'stat-change ' + (pnlPct >= 0 ? 'positive' : 'negative');
     }
 }
 
