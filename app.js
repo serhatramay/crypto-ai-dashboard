@@ -313,32 +313,46 @@ function addTradeToTable(trade) {
 }
 
 function loadInitialData() {
-    // Load initial trades
-    const sampleTrades = [
-        { time: '14:32:15', symbol: 'BTCUSDT', side: 'buy', entry: 45230.50, exit: 45890.25, pnl: 659.75, model: 'gpt-4' },
-        { time: '14:28:42', symbol: 'ETHUSDT', side: 'sell', entry: 2890.75, exit: 2845.20, pnl: 45.55, model: 'claude' },
-        { time: '14:15:08', symbol: 'SOLUSDT', side: 'buy', entry: 98.45, exit: 102.30, pnl: 3.85, model: 'deepseek' },
-    ];
-    
-    if (elements.tradesTbody) {
-        elements.tradesTbody.innerHTML = sampleTrades.map(t => `
-            <tr>
-                <td>${t.time}</td>
-                <td>${t.symbol}</td>
-                <td><span class="trade-type ${t.side === 'buy' ? 'long' : 'short'}">${t.side.toUpperCase()}</span></td>
-                <td>$${t.entry.toFixed(2)}</td>
-                <td>$${t.exit.toFixed(2)}</td>
-                <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)}</td>
-                <td>${t.model}</td>
-            </tr>
-        `).join('');
-    }
-    
-    if (elements.winRate) {
-        elements.winRate.textContent = '68.5%';
-    }
-    
-    document.getElementById('trades-count').textContent = '47 trades';
+    // Load initial trades from server state
+    fetch('/api/state')
+        .then(r => r.json())
+        .then(data => {
+            const trades = data.trades || [];
+            
+            if (elements.tradesTbody && trades.length > 0) {
+                elements.tradesTbody.innerHTML = trades.map(t => `
+                    <tr>
+                        <td>${t.time}</td>
+                        <td>${t.symbol}</td>
+                        <td><span class="trade-type ${t.side === 'buy' ? 'long' : 'short'}">${t.side.toUpperCase()}</span></td>
+                        <td>$${t.entry.toFixed(2)}</td>
+                        <td>$${t.exit.toFixed(2)}</td>
+                        <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)}</td>
+                        <td>${t.model}</td>
+                    </tr>
+                `).join('');
+                
+                // Calculate real win rate
+                const winningTrades = trades.filter(t => t.pnl > 0).length;
+                const winRate = trades.length > 0 ? (winningTrades / trades.length * 100).toFixed(1) : 0;
+                
+                if (elements.winRate) {
+                    elements.winRate.textContent = winRate + '%';
+                }
+                
+                const tradesCountEl = document.getElementById('trades-count');
+                if (tradesCountEl) {
+                    tradesCountEl.textContent = trades.length + ' trades';
+                }
+            }
+            
+            // Update equity and PnL from server
+            if (data.equity) state.equity = data.equity;
+            if (data.pnl) state.pnl = data.pnl;
+            if (data.pnl_pct) state.pnl_pct = data.pnl_pct;
+            updateStats();
+        })
+        .catch(err => console.error('Failed to load initial data:', err));
 }
 
 // Notifications

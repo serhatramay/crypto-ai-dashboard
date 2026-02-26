@@ -32,6 +32,8 @@ class DashboardState:
             {"time": "14:32:15", "symbol": "BTCUSDT", "side": "buy", "entry": 45230.50, "exit": 45890.25, "pnl": 659.75, "model": "gpt-4"},
             {"time": "14:28:42", "symbol": "ETHUSDT", "side": "sell", "entry": 2890.75, "exit": 2845.20, "pnl": 45.55, "model": "claude"},
             {"time": "14:15:08", "symbol": "SOLUSDT", "side": "buy", "entry": 98.45, "exit": 102.30, "pnl": 3.85, "model": "deepseek"},
+            {"time": "13:45:22", "symbol": "BTCUSDT", "side": "sell", "entry": 46120.00, "exit": 45800.00, "pnl": -320.00, "model": "gpt-4"},
+            {"time": "13:12:05", "symbol": "XRPUSDT", "side": "buy", "entry": 2.35, "exit": 2.42, "pnl": 0.07, "model": "qwen"},
         ]
         self.pnl = -189.62  # Negative = loss
         self.equity = 9810.38
