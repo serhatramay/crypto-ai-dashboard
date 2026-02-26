@@ -27,7 +27,10 @@ class DashboardState:
             "SOLUSDT": {"price": 198.45, "change": 5.67},
             "XRPUSDT": {"price": 2.45, "change": -0.89}
         }
-        self.positions = []
+        self.positions = [
+            {"symbol": "BTCUSDT", "side": "buy", "entry": 84230.50, "size": 0.1, "leverage": 5, "pnl": -125.30},
+            {"symbol": "ETHUSDT", "side": "sell", "entry": 2456.80, "size": 2.0, "leverage": 3, "pnl": 89.45},
+        ]
         self.trades = [
             {"time": "14:32:15", "symbol": "BTCUSDT", "side": "buy", "entry": 45230.50, "exit": 45890.25, "pnl": 659.75, "model": "gpt-4"},
             {"time": "14:28:42", "symbol": "ETHUSDT", "side": "sell", "entry": 2890.75, "exit": 2845.20, "pnl": 45.55, "model": "claude"},
