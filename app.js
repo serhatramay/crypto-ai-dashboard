@@ -266,6 +266,29 @@ async function selectModel(model) {
     }
 }
 
+// Close position function
+async function closePosition(positionId) {
+    try {
+        const response = await fetch('/api/close', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position_id: positionId })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'ok') {
+            showNotification(`Position closed! P&L: ${result.trade.pnl >= 0 ? '+' : ''}$${Math.abs(result.trade.pnl).toFixed(2)}`, 'success');
+            // Refresh data
+            loadInitialData();
+        } else {
+            showNotification('Failed to close position: ' + (result.error || 'Unknown error'), 'error');
+        }
+    } catch (err) {
+        showNotification('Failed to close position', 'error');
+    }
+}
+
 // Stats & Data
 function updateStats() {
     // Calculate stats from state
@@ -355,33 +378,42 @@ function loadInitialData() {
                 
                 // Render positions in Trading tab
                 const positionsList = document.getElementById('positions-list');
-                if (positionsList && data.positions.length > 0) {
-                    positionsList.innerHTML = data.positions.map(p => `
-                        <div class="position-item">
-                            <div class="position-header">
-                                <span class="position-symbol">${p.symbol}</span>
-                                <span class="position-side ${p.side}">${p.side.toUpperCase()}</span>
+                if (positionsList) {
+                    if (data.positions && data.positions.length > 0) {
+                        positionsList.innerHTML = data.positions.map(p => `
+                            <div class="position-item">
+                                <div class="position-header">
+                                    <span class="position-symbol">${p.symbol}</span>
+                                    <span class="position-side ${p.side}">${p.side.toUpperCase()}</span>
+                                </div>
+                                <div class="position-details">
+                                    <div class="position-detail">
+                                        <span class="position-detail-label">Entry</span>
+                                        <span class="position-detail-value">$${p.entry.toFixed(2)}</span>
+                                    </div>
+                                    <div class="position-detail">
+                                        <span class="position-detail-label">Current</span>
+                                        <span class="position-detail-value">$${p.current_price ? p.current_price.toFixed(2) : p.entry.toFixed(2)}</span>
+                                    </div>
+                                    <div class="position-detail">
+                                        <span class="position-detail-label">Size</span>
+                                        <span class="position-detail-value">${p.size.toFixed(4)}</span>
+                                    </div>
+                                    <div class="position-detail">
+                                        <span class="position-detail-label">Leverage</span>
+                                        <span class="position-detail-value">${p.leverage}x</span>
+                                    </div>
+                                    <div class="position-detail">
+                                        <span class="position-detail-label">P&L</span>
+                                        <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
+                                    </div>
+                                </div>
+                                <button class="btn btn-secondary btn-sm btn-block" onclick="closePosition(${p.id})" style="margin-top: 12px;">Close Position</button>
                             </div>
-                            <div class="position-details">
-                                <div class="position-detail">
-                                    <span class="position-detail-label">Entry</span>
-                                    <span class="position-detail-value">$${p.entry.toFixed(2)}</span>
-                                </div>
-                                <div class="position-detail">
-                                    <span class="position-detail-label">Size</span>
-                                    <span class="position-detail-value">${p.size}</span>
-                                </div>
-                                <div class="position-detail">
-                                    <span class="position-detail-label">Leverage</span>
-                                    <span class="position-detail-value">${p.leverage}x</span>
-                                </div>
-                                <div class="position-detail">
-                                    <span class="position-detail-label">P&L</span>
-                                    <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('');
+                        `).join('');
+                    } else {
+                        positionsList.innerHTML = '<div class="empty-state">No open positions</div>';
+                    }
                 }
             }
         })
