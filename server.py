@@ -227,6 +227,27 @@ def db_load_all():
 # Turkey timezone (UTC+3)
 TR_TZ = timezone(timedelta(hours=3))
 
+# ============================================================
+# TELEGRAM BİLDİRİM
+# ============================================================
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8626429617:AAEhSi3CbMPAo1kryWn7uv-SIp40muSO_-k")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "1176599927")
+
+def send_telegram(message):
+    """Telegram bildirim gönder"""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = json.dumps({
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }).encode()
+        req = request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[Telegram] Error: {e}")
+
 # AI Trading Configuration
 AI_CONFIG = {
     "max_positions": 5,
@@ -793,6 +814,28 @@ class AITradingBot:
                         trade = result['trade']
                         print(f"[AI Bot] CLOSED: {trade['symbol']} | PnL: ${trade['pnl']:.2f} | {reason}")
 
+                        # Telegram bildirim
+                        pnl = trade['pnl']
+                        pnl_emoji = "✅" if pnl >= 0 else "❌"
+                        side_text = "LONG" if trade['side'] == 'buy' else "SHORT"
+                        coin = trade['symbol'].replace('USDT', '')
+                        lev = trade.get('leverage', 1)
+                        pnl_pct = (pnl / AI_CONFIG["trade_amount"]) * 100
+                        equity = self.state.get_equity()
+                        msg = (
+                            f"{pnl_emoji} <b>{side_text} Kapandı</b>\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"🪙 Coin: <b>{coin}/USDT</b>\n"
+                            f"💰 Giriş: <b>${trade['entry']:,.2f}</b>\n"
+                            f"💰 Çıkış: <b>${trade['exit']:,.2f}</b>\n"
+                            f"⚡ Kaldıraç: <b>{lev}x</b>\n"
+                            f"{'📈' if pnl >= 0 else '📉'} Kar/Zarar: <b>{'+' if pnl >= 0 else '-'}${abs(pnl):,.2f} ({pnl_pct:+.2f}%)</b>\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"💼 Bakiye: ${equity:,.2f}\n"
+                            f"📝 Sebep: {reason}"
+                        )
+                        send_telegram(msg)
+
                 # Yeni pozisyon analizi
                 for symbol in self.SYMBOLS:
                     price_data = self.state.prices.get(symbol)
@@ -816,6 +859,30 @@ class AITradingBot:
                         if result.get('status') == 'ok':
                             pos = result['position']
                             print(f"[AI Bot] OPENED: {pos['symbol']} {pos['side'].upper()} {leverage}x | Entry: ${pos['entry']:.2f} | {reason}")
+
+                            # Telegram bildirim
+                            self.state.update_position_pnl()
+                            tp = pos.get('tp_price', 0)
+                            sl = pos.get('sl_price', 0)
+                            emoji = "🟢" if signal == "buy" else "🔴"
+                            side_text = "LONG" if signal == "buy" else "SHORT"
+                            coin = pos['symbol'].replace('USDT', '')
+                            ind = indicators or {}
+                            rsi_val = ind.get('rsi', '-')
+                            score_val = ind.get('total_score', '-')
+                            msg = (
+                                f"{emoji} <b>{side_text} Açıldı</b>\n"
+                                f"━━━━━━━━━━━━━━━\n"
+                                f"🪙 Coin: <b>{coin}/USDT</b>\n"
+                                f"💰 Giriş: <b>${pos['entry']:,.2f}</b>\n"
+                                f"⚡ Kaldıraç: <b>{leverage}x</b>\n"
+                                f"🎯 TP: <b>${tp:,.2f}</b>\n"
+                                f"🛑 SL: <b>${sl:,.2f}</b>\n"
+                                f"━━━━━━━━━━━━━━━\n"
+                                f"📊 Skor: {score_val} | RSI: {rsi_val}\n"
+                                f"📝 {reason}"
+                            )
+                            send_telegram(msg)
 
                 time.sleep(AI_CONFIG["check_interval"])
 
