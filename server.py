@@ -107,7 +107,7 @@ TR_TZ = timezone(timedelta(hours=3))
 
 # AI Trading Configuration
 AI_CONFIG = {
-    "max_positions": 3,
+    "max_positions": 5,
     "trade_amount": 100,
     "check_interval": 30,  # 30 saniye
     "stop_loss_pct": 5,
