@@ -642,20 +642,22 @@ class AITradingBot:
                         self.fetch_historical_candles()
                         retry_history = 0
 
-                # Canlı fiyatlardan mum verisi biriktir (her 2 dakikada bir)
+                # Canlı fiyatlardan 1 dakikalık mum biriktir
                 candle_timer += 1
-                if candle_timer >= 4:  # 4 * 30sn = 2dk
+                if candle_timer >= 2:  # 2 * 30sn = 1dk
                     for sym in self.SYMBOLS:
                         live = self.price_history.get(sym, [])
                         if live:
                             self.candle_closes[sym].append(live[-1])
-                            if len(self.candle_closes[sym]) > 300:
+                            if len(self.candle_closes[sym]) > 500:
                                 self.candle_closes[sym].pop(0)
                     candle_timer = 0
-                    total_candles = sum(len(v) for v in self.candle_closes.values())
-                    if total_candles > 120 and not self.data_ready:
+                    # Her coin için en az 30 mum (30dk) birikince full moda geç
+                    ready_count = sum(1 for v in self.candle_closes.values() if len(v) >= 30)
+                    if ready_count >= 3 and not self.data_ready:
                         self.data_ready = True
-                        print(f"[AI Bot] Live candle data ready! Switching to FULL analysis mode")
+                        candle_info = {s: len(v) for s, v in self.candle_closes.items()}
+                        print(f"[AI Bot] FULL analysis mode active! Candles: {candle_info}")
 
                 # Stop loss / take profit / ters sinyal kontrolü
                 positions_to_close = []
