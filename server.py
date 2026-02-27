@@ -436,9 +436,9 @@ class AITradingBot:
         total_score = max(-100, min(100, total_score))
 
         # === KARAR ===
-        if total_score > 20:
+        if total_score > 10:
             signal = "buy"
-        elif total_score < -20:
+        elif total_score < -10:
             signal = "sell"
         else:
             signal = "hold"
