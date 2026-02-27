@@ -258,7 +258,7 @@ class AITradingBot:
         """Price updater'dan fiyat geçmişini besle"""
         if price and price > 0:
             self.price_history[symbol].append(price)
-            if len(self.price_history[symbol]) > 100:
+            if len(self.price_history[symbol]) > 200:
                 self.price_history[symbol].pop(0)
 
     def fetch_historical_candles(self):
@@ -266,17 +266,32 @@ class AITradingBot:
         print("[AI Bot] Fetching historical candle data...")
         for symbol in self.SYMBOLS:
             coin = self.SYMBOL_MAP[symbol]
-            try:
-                url = f'https://min-api.cryptocompare.com/data/v2/histohour?fsym={coin}&tsym=USD&limit=200'
-                req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with request.urlopen(req, timeout=15) as resp:
-                    data = json.loads(resp.read().decode())
-                    candles = data.get('Data', {}).get('Data', [])
-                    self.candle_closes[symbol] = [c['close'] for c in candles if c.get('close')]
-                    self.candle_volumes[symbol] = [c.get('volumeto', 0) for c in candles]
-                    print(f"  [OK] {symbol}: {len(self.candle_closes[symbol])} candles loaded")
-            except Exception as e:
-                print(f"  [FAIL] {symbol}: {e}")
+            # Birden fazla API dene
+            apis = [
+                f'https://min-api.cryptocompare.com/data/v2/histohour?fsym={coin}&tsym=USD&limit=200',
+                f'https://api.binance.us/api/v3/klines?symbol={symbol}&interval=1h&limit=200',
+            ]
+            for api_url in apis:
+                try:
+                    req = request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with request.urlopen(req, timeout=15) as resp:
+                        raw = json.loads(resp.read().decode())
+                        if 'Data' in raw:
+                            # CryptoCompare format
+                            candles = raw.get('Data', {}).get('Data', [])
+                            self.candle_closes[symbol] = [c['close'] for c in candles if c.get('close')]
+                            self.candle_volumes[symbol] = [c.get('volumeto', 0) for c in candles]
+                        elif isinstance(raw, list) and len(raw) > 0:
+                            # Binance format: [time, open, high, low, close, volume, ...]
+                            self.candle_closes[symbol] = [float(c[4]) for c in raw]
+                            self.candle_volumes[symbol] = [float(c[5]) for c in raw]
+                        print(f"  [OK] {symbol}: {len(self.candle_closes[symbol])} candles")
+                        break
+                except Exception as e:
+                    print(f"  [RETRY] {symbol} from {api_url[:40]}...: {e}")
+                    continue
+            if not self.candle_closes.get(symbol):
+                print(f"  [FAIL] {symbol}: No historical data available")
         self.data_ready = any(len(v) > 50 for v in self.candle_closes.values())
         print(f"[AI Bot] Historical data ready: {self.data_ready}")
 
@@ -311,8 +326,43 @@ class AITradingBot:
         change_24h = price_data.get('change', 0)
         volumes = self.candle_volumes.get(symbol, [])
 
+        # Yeterli veri yoksa kısa vadeli fiyatlarla basit analiz yap
         if len(prices) < 30:
-            return "hold", "Yetersiz veri", 0, {}
+            live = self.price_history.get(symbol, [])
+            if len(live) < 5:
+                return "hold", "Veri bekleniyor...", 0, {}
+            # Basit analiz - change bazlı
+            rsi_simple = TechnicalAnalyzer.rsi(live, min(14, len(live) - 1)) if len(live) > 3 else 50
+            fg = self.fear_greed.get('value', 50)
+            score = 0
+            reasons = []
+            if change_24h < -2:
+                score += 40
+                reasons.append(f"Düşüş:{change_24h:.1f}%")
+            elif change_24h > 2:
+                score -= 40
+                reasons.append(f"Yükseliş:{change_24h:.1f}%")
+            if rsi_simple < 35:
+                score += 30
+                reasons.append(f"RSI:{rsi_simple:.0f}")
+            elif rsi_simple > 65:
+                score -= 30
+                reasons.append(f"RSI:{rsi_simple:.0f}")
+            if fg < 25:
+                score += 20
+                reasons.append(f"F&G:{fg}")
+            elif fg > 75:
+                score -= 20
+                reasons.append(f"F&G:{fg}")
+
+            if score > 10:
+                signal, lev = "buy", 15
+            elif score < -10:
+                signal, lev = "sell", 15
+            else:
+                signal, lev = "hold", 0
+            reason_text = f"Skor:{score:.0f} (basit) | " + " + ".join(reasons) if reasons else f"Skor:{score:.0f} | Nötr"
+            return signal, reason_text, lev, {"total_score": score, "mode": "basic", "rsi": round(rsi_simple, 1), "fear_greed": self.fear_greed}
 
         # === TÜM GÖSTERGELERİ HESAPLA ===
         rsi = TechnicalAnalyzer.rsi(prices, 14)
