@@ -155,11 +155,52 @@ class PaperTradingState:
     def update_prices(self):
         """Çoklu API desteği - biri çalışmazsa diğeri devreye girer"""
         
-        # API 1: CoinGecko
+        # API 1: Binance.US (ABD versiyonu, farklı IP blokları)
         try:
-            url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true'
+            url = 'https://api.binance.us/api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]'
             req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with request.urlopen(req, timeout=8) as response:
+                data = json.loads(response.read().decode())
+                with self.lock:
+                    for item in data:
+                        symbol = item['symbol']
+                        self.prices[symbol] = {
+                            "price": float(item['lastPrice']),
+                            "change": float(item['priceChangePercent'])
+                        }
+                    self.update_position_pnl()
+                    print("[Price] Binance.US OK")
+                    return
+        except Exception as e:
+            print(f"[Price] Binance.US failed: {e}")
+        
+        # API 2: KuCoin
+        try:
+            url = 'https://api.kucoin.com/api/v1/market/allTickers'
+            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with request.urlopen(req, timeout=8) as response:
+                data = json.loads(response.read().decode())
+                tickers = {t['symbol']: t for t in data['data']['ticker']}
+                with self.lock:
+                    if 'BTC-USDT' in tickers:
+                        self.prices["BTCUSDT"] = {"price": float(tickers['BTC-USDT']['last']), "change": float(tickers['BTC-USDT']['changeRate']) * 100}
+                    if 'ETH-USDT' in tickers:
+                        self.prices["ETHUSDT"] = {"price": float(tickers['ETH-USDT']['last']), "change": float(tickers['ETH-USDT']['changeRate']) * 100}
+                    if 'SOL-USDT' in tickers:
+                        self.prices["SOLUSDT"] = {"price": float(tickers['SOL-USDT']['last']), "change": float(tickers['SOL-USDT']['changeRate']) * 100}
+                    if 'XRP-USDT' in tickers:
+                        self.prices["XRPUSDT"] = {"price": float(tickers['XRP-USDT']['last']), "change": float(tickers['XRP-USDT']['changeRate']) * 100}
+                    self.update_position_pnl()
+                    print("[Price] KuCoin OK")
+                    return
+        except Exception as e:
+            print(f"[Price] KuCoin failed: {e}")
+        
+        # API 3: CoinGecko (proxy üzerinden)
+        try:
+            url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true'
+            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+            with request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode())
                 with self.lock:
                     self.prices["BTCUSDT"] = {"price": float(data['bitcoin']['usd']), "change": float(data['bitcoin'].get('usd_24h_change', 0))}
@@ -172,29 +213,7 @@ class PaperTradingState:
         except Exception as e:
             print(f"[Price] CoinGecko failed: {e}")
         
-        # API 2: CoinCap
-        try:
-            symbols_map = {"bitcoin": "BTCUSDT", "ethereum": "ETHUSDT", "solana": "SOLUSDT", "xrp": "XRPUSDT"}
-            ids = "bitcoin,ethereum,solana,xrp"
-            url = f'https://api.coincap.io/v2/assets?ids={ids}'
-            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with request.urlopen(req, timeout=8) as response:
-                data = json.loads(response.read().decode())
-                with self.lock:
-                    for item in data['data']:
-                        symbol = symbols_map.get(item['id'])
-                        if symbol:
-                            self.prices[symbol] = {
-                                "price": float(item['priceUsd']),
-                                "change": float(item.get('changePercent24Hr', 0))
-                            }
-                    self.update_position_pnl()
-                    print("[Price] CoinCap OK")
-                    return
-        except Exception as e:
-            print(f"[Price] CoinCap failed: {e}")
-        
-        # API 3: CryptoCompare (ücretsiz, rate limit yüksek)
+        # API 4: CryptoCompare
         try:
             url = 'https://min-api.cryptocompare.com/data/pricemultifull?fsyms=BTC,ETH,SOL,XRP&tsyms=USD'
             req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
