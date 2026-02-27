@@ -125,20 +125,24 @@ function renderPositions() {
             dashboardTbody.innerHTML = positions.map(p => {
                 const currentPrice = p.current_price || p.entry;
                 const pnlPct = p.margin ? (p.pnl / p.margin * 100).toFixed(2) : '0.00';
+                const tpPrice = p.tp_price || 0;
+                const slPrice = p.sl_price || 0;
+                const fmt = (v) => v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                 return `
                 <tr>
                     <td>${p.symbol.replace('USDT', '')}</td>
                     <td><span class="trade-type ${p.side === 'buy' ? 'long' : 'short'}">${p.side === 'buy' ? 'LONG' : 'SHORT'}</span></td>
-                    <td>$${p.entry.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                    <td>$${currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                    <td>$${p.margin.toFixed(0)}</td>
+                    <td>$${fmt(p.entry)}</td>
+                    <td>$${fmt(currentPrice)}</td>
+                    <td style="color: var(--accent-success)">$${fmt(tpPrice)}</td>
+                    <td style="color: var(--accent-danger)">$${fmt(slPrice)}</td>
                     <td>${p.leverage}x</td>
                     <td class="trade-pnl ${p.pnl >= 0 ? 'positive' : 'negative'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)} (${pnlPct}%)</td>
                     <td><button class="btn btn-secondary btn-sm" onclick="closePosition(${p.id})">Kapat</button></td>
                 </tr>`;
             }).join('');
         } else {
-            dashboardTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--text-muted); padding: 20px;">Aktif pozisyon yok</td></tr>';
+            dashboardTbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color: var(--text-muted); padding: 20px;">Aktif pozisyon yok</td></tr>';
         }
     }
 

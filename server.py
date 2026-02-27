@@ -400,14 +400,29 @@ class PaperTradingState:
         for pos in self.positions:
             symbol = pos['symbol']
             current_price = self.prices.get(symbol, {}).get('price', pos['entry'])
-            
+
             if pos['side'] == 'buy':
                 price_diff = current_price - pos['entry']
             else:
                 price_diff = pos['entry'] - current_price
-            
+
             pos['pnl'] = price_diff * pos['size'] * pos['leverage']
             pos['current_price'] = current_price
+
+            # Hedef fiyatları hesapla (take profit / stop loss)
+            entry = pos['entry']
+            size = pos['size']
+            leverage = pos['leverage']
+            margin = pos['margin']
+            tp_delta = (margin * AI_CONFIG["take_profit_pct"] / 100) / (size * leverage)
+            sl_delta = (margin * AI_CONFIG["stop_loss_pct"] / 100) / (size * leverage)
+
+            if pos['side'] == 'buy':
+                pos['tp_price'] = entry + tp_delta
+                pos['sl_price'] = entry - sl_delta
+            else:
+                pos['tp_price'] = entry - tp_delta
+                pos['sl_price'] = entry + sl_delta
     
     def open_position(self, symbol, side, amount, leverage=1):
         with self.lock:
