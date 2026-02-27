@@ -109,7 +109,6 @@ TR_TZ = timezone(timedelta(hours=3))
 AI_CONFIG = {
     "max_positions": 3,
     "trade_amount": 100,
-    "leverage": 10,
     "check_interval": 30,  # 30 saniye
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
@@ -143,25 +142,30 @@ class AITradingBot:
         # Trend analizi
         trend = self._analyze_trend(symbol)
         
-        # Karar mantığı (daha agresif eşikler)
+        # Karar mantığı - sinyal gücüne göre kaldıraç (10x-30x)
+        # Güçlü sinyal = yüksek kaldıraç, zayıf sinyal = düşük kaldıraç
         if rsi < 40 and trend == "up":
-            return "buy", f"RSI düşük ({rsi:.1f}) + yükseliş trendi"
+            lev = 25 if rsi < 30 else 20
+            return "buy", f"RSI düşük ({rsi:.1f}) + yükseliş trendi", lev
         elif rsi > 60 and trend == "down":
-            return "sell", f"RSI yüksek ({rsi:.1f}) + düşüş trendi"
+            lev = 25 if rsi > 70 else 20
+            return "sell", f"RSI yüksek ({rsi:.1f}) + düşüş trendi", lev
         elif change < -2:
-            return "buy", f"Dip alım fırsatı (%{change:.2f} düşüş)"
+            lev = 30 if change < -4 else 20
+            return "buy", f"Dip alım fırsatı (%{change:.2f} düşüş)", lev
         elif change > 2:
-            return "sell", f"Kar realizasyonu (%{change:.2f} yükseliş)"
+            lev = 30 if change > 4 else 20
+            return "sell", f"Kar realizasyonu (%{change:.2f} yükseliş)", lev
         elif change > 1 and trend == "up":
-            return "buy", f"Momentum pozitif (+{change:.2f}%)"
+            return "buy", f"Momentum pozitif (+{change:.2f}%)", 15
         elif change < -1 and trend == "down":
-            return "sell", f"Momentum negatif ({change:.2f}%)"
+            return "sell", f"Momentum negatif ({change:.2f}%)", 15
         elif rsi < 45:
-            return "buy", f"RSI alım bölgesi ({rsi:.1f})"
+            return "buy", f"RSI alım bölgesi ({rsi:.1f})", 10
         elif rsi > 55:
-            return "sell", f"RSI satım bölgesi ({rsi:.1f})"
+            return "sell", f"RSI satım bölgesi ({rsi:.1f})", 10
         else:
-            return "hold", f"Nötr - RSI:{rsi:.1f}, Trend:{trend}"
+            return "hold", f"Nötr - RSI:{rsi:.1f}, Trend:{trend}", 0
     
     def _calculate_rsi(self, symbol, period=14):
         """Basit RSI hesaplama"""
@@ -249,20 +253,21 @@ class AITradingBot:
                     if not price_data:
                         continue
                     
-                    signal, reason = self.analyze_market(symbol, price_data)
+                    signal, reason, leverage = self.analyze_market(symbol, price_data)
                     self.last_analysis[symbol] = {
                         "signal": signal,
                         "reason": reason,
+                        "leverage": leverage,
                         "time": datetime.now(TR_TZ).strftime("%H:%M:%S")
                     }
-                    
+
                     if self.should_open_position(symbol, signal):
                         side = signal
                         result = self.state.open_position(
                             symbol=symbol,
                             side=side,
                             amount=AI_CONFIG["trade_amount"],
-                            leverage=AI_CONFIG["leverage"]
+                            leverage=leverage
                         )
                         
                         if result.get('status') == 'ok':
