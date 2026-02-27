@@ -9,6 +9,7 @@ AI Crypto Trading Dashboard Server
 import json
 import os
 import sys
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -17,6 +18,87 @@ from pathlib import Path
 from urllib import request
 import socketserver
 import urllib.parse
+
+# Database
+DB_PATH = Path(__file__).parent / "trading.db"
+
+def init_db():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("""CREATE TABLE IF NOT EXISTS trades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        time TEXT, date TEXT, symbol TEXT, side TEXT,
+        entry REAL, exit_price REAL, pnl REAL, model TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT, side TEXT, entry REAL, size REAL,
+        leverage INTEGER, margin REAL, open_time TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS state (
+        key TEXT PRIMARY KEY, value REAL
+    )""")
+    conn.commit()
+    conn.close()
+    print("[DB] SQLite initialized")
+
+def db_save_trade(trade):
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute(
+        "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, model) VALUES (?,?,?,?,?,?,?,?)",
+        (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
+         trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'], trade['model'])
+    )
+    conn.commit()
+    conn.close()
+
+def db_save_position(pos):
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute(
+        "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (?,?,?,?,?,?,?,?)",
+        (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
+    )
+    conn.commit()
+    conn.close()
+
+def db_remove_position(pos_id):
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("DELETE FROM positions WHERE id = ?", (pos_id,))
+    conn.commit()
+    conn.close()
+
+def db_save_balance(balance):
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES ('balance', ?)", (balance,))
+    conn.commit()
+    conn.close()
+
+def db_load_all():
+    """Sunucu başlangıcında tüm verileri yükle"""
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+
+    trades = []
+    for row in conn.execute("SELECT * FROM trades ORDER BY id DESC"):
+        trades.append({
+            "time": row['time'], "date": row['date'], "symbol": row['symbol'],
+            "side": row['side'], "entry": row['entry'], "exit": row['exit_price'],
+            "pnl": row['pnl'], "model": row['model']
+        })
+
+    positions = []
+    for row in conn.execute("SELECT * FROM positions"):
+        positions.append({
+            "id": row['id'], "symbol": row['symbol'], "side": row['side'],
+            "entry": row['entry'], "current_price": row['entry'], "size": row['size'],
+            "leverage": row['leverage'], "margin": row['margin'], "pnl": 0.0,
+            "open_time": row['open_time']
+        })
+
+    balance_row = conn.execute("SELECT value FROM state WHERE key = 'balance'").fetchone()
+    balance = balance_row['value'] if balance_row else None
+
+    conn.close()
+    return trades, positions, balance
 
 # Turkey timezone (UTC+3)
 TR_TZ = timezone(timedelta(hours=3))
@@ -206,7 +288,6 @@ class AITradingBot:
 
 class PaperTradingState:
     def __init__(self):
-        self.balance = 10000.0
         self.initial_balance = 10000.0
         self.prices = {
             "BTCUSDT": {"price": 84230.50, "change": 2.34},
@@ -214,12 +295,18 @@ class PaperTradingState:
             "SOLUSDT": {"price": 198.45, "change": 5.67},
             "XRPUSDT": {"price": 2.45, "change": -0.89}
         }
-        self.positions = []
-        self.trades = []
         self.ai_status = "idle"
         self.selected_model = "gpt-4"
         self.lock = threading.Lock()
         self.ai_bot = AITradingBot(self)
+
+        # DB'den yükle
+        init_db()
+        saved_trades, saved_positions, saved_balance = db_load_all()
+        self.trades = saved_trades
+        self.positions = saved_positions
+        self.balance = saved_balance if saved_balance is not None else self.initial_balance
+        print(f"[DB] Loaded: {len(self.trades)} trades, {len(self.positions)} positions, balance=${self.balance:.2f}")
         
     def update_prices(self):
         """Çoklu API desteği - biri çalışmazsa diğeri devreye girer"""
@@ -328,8 +415,12 @@ class PaperTradingState:
             
             self.balance -= amount
             
+            # Benzersiz ID için DB'deki max + mevcut pozisyonlardan büyük olan
+            max_id = max([p['id'] for p in self.positions], default=0)
+            new_id = max_id + 1
+
             position = {
-                "id": len(self.positions) + 1,
+                "id": new_id,
                 "symbol": symbol,
                 "side": side,
                 "entry": price,
@@ -340,9 +431,11 @@ class PaperTradingState:
                 "pnl": 0.0,
                 "open_time": datetime.now(TR_TZ).strftime("%H:%M:%S")
             }
-            
+
             self.positions.append(position)
-            
+            db_save_position(position)
+            db_save_balance(self.balance)
+
             return {
                 "status": "ok",
                 "position": position,
@@ -367,6 +460,7 @@ class PaperTradingState:
             
             trade = {
                 "time": datetime.now(TR_TZ).strftime("%H:%M:%S"),
+                "date": datetime.now(TR_TZ).strftime("%Y-%m-%d"),
                 "symbol": pos['symbol'],
                 "side": pos['side'],
                 "entry": pos['entry'],
@@ -375,9 +469,12 @@ class PaperTradingState:
                 "model": self.selected_model
             }
             self.trades.insert(0, trade)
-            
             self.positions.remove(pos)
-            
+
+            db_save_trade(trade)
+            db_remove_position(pos['id'])
+            db_save_balance(self.balance)
+
             return {
                 "status": "ok",
                 "trade": trade,
@@ -403,7 +500,7 @@ class PaperTradingState:
             return {
                 "prices": self.prices,
                 "positions": self.positions,
-                "trades": self.trades[:20],
+                "trades": self.trades[:50],
                 "balance": self.balance,
                 "equity": equity,
                 "initial_balance": self.initial_balance,
