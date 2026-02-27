@@ -10,7 +10,6 @@ import json
 import math
 import os
 import sys
-import sqlite3
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -20,86 +19,180 @@ from urllib import request
 import socketserver
 import urllib.parse
 
-# Database
-DB_PATH = Path(__file__).parent / "trading.db"
+# ============================================================
+# DATABASE - PostgreSQL (Neon) with SQLite fallback
+# ============================================================
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if DATABASE_URL:
+    import psycopg2
+    import psycopg2.extras
+
+def get_conn():
+    """Veritabanı bağlantısı al"""
+    if DATABASE_URL:
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.autocommit = True
+        return conn
+    else:
+        import sqlite3
+        conn = sqlite3.connect(str(Path(__file__).parent / "trading.db"))
+        conn.row_factory = sqlite3.Row
+        return conn
 
 def init_db():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("""CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        time TEXT, date TEXT, symbol TEXT, side TEXT,
-        entry REAL, exit_price REAL, pnl REAL, leverage INTEGER DEFAULT 1, model TEXT
-    )""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS positions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT, side TEXT, entry REAL, size REAL,
-        leverage INTEGER, margin REAL, open_time TEXT
-    )""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS state (
-        key TEXT PRIMARY KEY, value REAL
-    )""")
-    conn.commit()
+    conn = get_conn()
+    cur = conn.cursor()
+    if DATABASE_URL:
+        cur.execute("""CREATE TABLE IF NOT EXISTS trades (
+            id SERIAL PRIMARY KEY,
+            time TEXT, date TEXT, symbol TEXT, side TEXT,
+            entry DOUBLE PRECISION, exit_price DOUBLE PRECISION,
+            pnl DOUBLE PRECISION, leverage INTEGER DEFAULT 1, model TEXT
+        )""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS positions (
+            id INTEGER PRIMARY KEY,
+            symbol TEXT, side TEXT, entry DOUBLE PRECISION, size DOUBLE PRECISION,
+            leverage INTEGER, margin DOUBLE PRECISION, open_time TEXT
+        )""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS state (
+            key TEXT PRIMARY KEY, value DOUBLE PRECISION
+        )""")
+        print("[DB] PostgreSQL (Neon) initialized")
+    else:
+        cur.execute("""CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            time TEXT, date TEXT, symbol TEXT, side TEXT,
+            entry REAL, exit_price REAL, pnl REAL, leverage INTEGER DEFAULT 1, model TEXT
+        )""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT, side TEXT, entry REAL, size REAL,
+            leverage INTEGER, margin REAL, open_time TEXT
+        )""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS state (
+            key TEXT PRIMARY KEY, value REAL
+        )""")
+        conn.commit()
+        print("[DB] SQLite initialized (local mode)")
+    cur.close()
     conn.close()
-    print("[DB] SQLite initialized")
 
 def db_save_trade(trade):
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute(
-        "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (?,?,?,?,?,?,?,?,?)",
-        (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
-         trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
-         trade.get('leverage', 1), trade['model'])
-    )
-    conn.commit()
+    conn = get_conn()
+    cur = conn.cursor()
+    if DATABASE_URL:
+        cur.execute(
+            "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
+             trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
+             trade.get('leverage', 1), trade['model'])
+        )
+    else:
+        cur.execute(
+            "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (?,?,?,?,?,?,?,?,?)",
+            (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
+             trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
+             trade.get('leverage', 1), trade['model'])
+        )
+        conn.commit()
+    cur.close()
     conn.close()
 
 def db_save_position(pos):
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute(
-        "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (?,?,?,?,?,?,?,?)",
-        (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
-    )
-    conn.commit()
+    conn = get_conn()
+    cur = conn.cursor()
+    if DATABASE_URL:
+        cur.execute(
+            "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
+            (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
+        )
+    else:
+        cur.execute(
+            "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (?,?,?,?,?,?,?,?)",
+            (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
+        )
+        conn.commit()
+    cur.close()
     conn.close()
 
 def db_remove_position(pos_id):
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("DELETE FROM positions WHERE id = ?", (pos_id,))
-    conn.commit()
+    conn = get_conn()
+    cur = conn.cursor()
+    if DATABASE_URL:
+        cur.execute("DELETE FROM positions WHERE id = %s", (pos_id,))
+    else:
+        cur.execute("DELETE FROM positions WHERE id = ?", (pos_id,))
+        conn.commit()
+    cur.close()
     conn.close()
 
 def db_save_balance(balance):
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES ('balance', ?)", (balance,))
-    conn.commit()
+    conn = get_conn()
+    cur = conn.cursor()
+    if DATABASE_URL:
+        cur.execute("INSERT INTO state (key, value) VALUES ('balance', %s) ON CONFLICT (key) DO UPDATE SET value = %s", (balance, balance))
+    else:
+        cur.execute("INSERT OR REPLACE INTO state (key, value) VALUES ('balance', ?)", (balance,))
+        conn.commit()
+    cur.close()
     conn.close()
 
 def db_load_all():
     """Sunucu başlangıcında tüm verileri yükle"""
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    conn = get_conn()
+    cur = conn.cursor()
 
     trades = []
-    for row in conn.execute("SELECT * FROM trades ORDER BY id DESC"):
-        trades.append({
-            "time": row['time'], "date": row['date'], "symbol": row['symbol'],
-            "side": row['side'], "entry": row['entry'], "exit": row['exit_price'],
-            "pnl": row['pnl'], "leverage": row['leverage'] if 'leverage' in row.keys() else 1,
-            "model": row['model']
-        })
+    if DATABASE_URL:
+        cur.execute("SELECT time, date, symbol, side, entry, exit_price, pnl, leverage, model FROM trades ORDER BY id DESC")
+        for row in cur.fetchall():
+            trades.append({
+                "time": row[0], "date": row[1], "symbol": row[2],
+                "side": row[3], "entry": row[4], "exit": row[5],
+                "pnl": row[6], "leverage": row[7] or 1, "model": row[8]
+            })
+    else:
+        for row in conn.execute("SELECT * FROM trades ORDER BY id DESC"):
+            trades.append({
+                "time": row['time'], "date": row['date'], "symbol": row['symbol'],
+                "side": row['side'], "entry": row['entry'], "exit": row['exit_price'],
+                "pnl": row['pnl'], "leverage": row['leverage'] if 'leverage' in row.keys() else 1,
+                "model": row['model']
+            })
 
     positions = []
-    for row in conn.execute("SELECT * FROM positions"):
-        positions.append({
-            "id": row['id'], "symbol": row['symbol'], "side": row['side'],
-            "entry": row['entry'], "current_price": row['entry'], "size": row['size'],
-            "leverage": row['leverage'], "margin": row['margin'], "pnl": 0.0,
-            "open_time": row['open_time']
-        })
+    if DATABASE_URL:
+        cur.execute("SELECT id, symbol, side, entry, size, leverage, margin, open_time FROM positions")
+        for row in cur.fetchall():
+            positions.append({
+                "id": row[0], "symbol": row[1], "side": row[2],
+                "entry": row[3], "current_price": row[3], "size": row[4],
+                "leverage": row[5], "margin": row[6], "pnl": 0.0,
+                "open_time": row[7]
+            })
+    else:
+        for row in conn.execute("SELECT * FROM positions"):
+            positions.append({
+                "id": row['id'], "symbol": row['symbol'], "side": row['side'],
+                "entry": row['entry'], "current_price": row['entry'], "size": row['size'],
+                "leverage": row['leverage'], "margin": row['margin'], "pnl": 0.0,
+                "open_time": row['open_time']
+            })
 
-    balance_row = conn.execute("SELECT value FROM state WHERE key = 'balance'").fetchone()
-    balance = balance_row['value'] if balance_row else None
+    balance = None
+    if DATABASE_URL:
+        cur.execute("SELECT value FROM state WHERE key = 'balance'")
+        balance_row = cur.fetchone()
+        if balance_row:
+            balance = balance_row[0]
+    else:
+        balance_row = conn.execute("SELECT value FROM state WHERE key = 'balance'").fetchone()
+        if balance_row:
+            balance = balance_row['value']
 
+    cur.close()
     conn.close()
     return trades, positions, balance
 
