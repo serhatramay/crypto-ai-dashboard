@@ -112,48 +112,73 @@ function syncBotButton() {
 function renderPositions() {
     const positionsList = document.getElementById('positions-list');
     const positionsCountEl = document.getElementById('positions');
+    const dashboardTbody = document.getElementById('dashboard-positions-tbody');
     const positions = state.serverPositions || [];
 
     if (positionsCountEl) {
         positionsCountEl.textContent = positions.length;
     }
 
-    if (!positionsList) return;
+    // Dashboard tablosu
+    if (dashboardTbody) {
+        if (positions.length > 0) {
+            dashboardTbody.innerHTML = positions.map(p => {
+                const currentPrice = p.current_price || p.entry;
+                const pnlPct = p.margin ? (p.pnl / p.margin * 100).toFixed(2) : '0.00';
+                return `
+                <tr>
+                    <td>${p.symbol.replace('USDT', '')}</td>
+                    <td><span class="trade-type ${p.side === 'buy' ? 'long' : 'short'}">${p.side === 'buy' ? 'LONG' : 'SHORT'}</span></td>
+                    <td>$${p.entry.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td>$${currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td>$${p.margin.toFixed(0)}</td>
+                    <td>${p.leverage}x</td>
+                    <td class="trade-pnl ${p.pnl >= 0 ? 'positive' : 'negative'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)} (${pnlPct}%)</td>
+                    <td><button class="btn btn-secondary btn-sm" onclick="closePosition(${p.id})">Kapat</button></td>
+                </tr>`;
+            }).join('');
+        } else {
+            dashboardTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--text-muted); padding: 20px;">Aktif pozisyon yok</td></tr>';
+        }
+    }
 
-    if (positions.length > 0) {
-        positionsList.innerHTML = positions.map(p => `
-            <div class="position-item">
-                <div class="position-header">
-                    <span class="position-symbol">${p.symbol}</span>
-                    <span class="position-side ${p.side}">${p.side.toUpperCase()}</span>
+    // Trading tab kartları
+    if (positionsList) {
+        if (positions.length > 0) {
+            positionsList.innerHTML = positions.map(p => `
+                <div class="position-item">
+                    <div class="position-header">
+                        <span class="position-symbol">${p.symbol}</span>
+                        <span class="position-side ${p.side}">${p.side.toUpperCase()}</span>
+                    </div>
+                    <div class="position-details">
+                        <div class="position-detail">
+                            <span class="position-detail-label">Entry</span>
+                            <span class="position-detail-value">$${p.entry.toFixed(2)}</span>
+                        </div>
+                        <div class="position-detail">
+                            <span class="position-detail-label">Current</span>
+                            <span class="position-detail-value">$${p.current_price ? p.current_price.toFixed(2) : p.entry.toFixed(2)}</span>
+                        </div>
+                        <div class="position-detail">
+                            <span class="position-detail-label">Miktar</span>
+                            <span class="position-detail-value">$${p.margin.toFixed(0)}</span>
+                        </div>
+                        <div class="position-detail">
+                            <span class="position-detail-label">Kaldıraç</span>
+                            <span class="position-detail-value">${p.leverage}x</span>
+                        </div>
+                        <div class="position-detail">
+                            <span class="position-detail-label">P&L</span>
+                            <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary btn-sm btn-block" onclick="closePosition(${p.id})" style="margin-top: 12px;">Kapat</button>
                 </div>
-                <div class="position-details">
-                    <div class="position-detail">
-                        <span class="position-detail-label">Entry</span>
-                        <span class="position-detail-value">$${p.entry.toFixed(2)}</span>
-                    </div>
-                    <div class="position-detail">
-                        <span class="position-detail-label">Current</span>
-                        <span class="position-detail-value">$${p.current_price ? p.current_price.toFixed(2) : p.entry.toFixed(2)}</span>
-                    </div>
-                    <div class="position-detail">
-                        <span class="position-detail-label">Size</span>
-                        <span class="position-detail-value">${p.size.toFixed(4)}</span>
-                    </div>
-                    <div class="position-detail">
-                        <span class="position-detail-label">Leverage</span>
-                        <span class="position-detail-value">${p.leverage}x</span>
-                    </div>
-                    <div class="position-detail">
-                        <span class="position-detail-label">P&L</span>
-                        <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
-                    </div>
-                </div>
-                <button class="btn btn-secondary btn-sm btn-block" onclick="closePosition(${p.id})" style="margin-top: 12px;">Close Position</button>
-            </div>
-        `).join('');
-    } else {
-        positionsList.innerHTML = '<div class="empty-state">No open positions</div>';
+            `).join('');
+        } else {
+            positionsList.innerHTML = '<div class="empty-state">Aktif pozisyon yok</div>';
+        }
     }
 }
 
