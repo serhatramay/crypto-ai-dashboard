@@ -154,17 +154,28 @@ class PaperTradingState:
         
     def update_prices(self):
         try:
-            url = 'https://api.binance.com/api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]'
+            # CoinGecko API - daha yaygın erişim
+            url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true'
             req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode())
                 with self.lock:
-                    for item in data:
-                        symbol = item['symbol']
-                        self.prices[symbol] = {
-                            "price": float(item['lastPrice']),
-                            "change": float(item['priceChangePercent'])
-                        }
+                    self.prices["BTCUSDT"] = {
+                        "price": float(data['bitcoin']['usd']),
+                        "change": float(data['bitcoin'].get('usd_24h_change', 0))
+                    }
+                    self.prices["ETHUSDT"] = {
+                        "price": float(data['ethereum']['usd']),
+                        "change": float(data['ethereum'].get('usd_24h_change', 0))
+                    }
+                    self.prices["SOLUSDT"] = {
+                        "price": float(data['solana']['usd']),
+                        "change": float(data['solana'].get('usd_24h_change', 0))
+                    }
+                    self.prices["XRPUSDT"] = {
+                        "price": float(data['ripple']['usd']),
+                        "change": float(data['ripple'].get('usd_24h_change', 0))
+                    }
                     self.update_position_pnl()
         except Exception as e:
             print(f"[Price Update] Error: {e}")
@@ -359,6 +370,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(content)
         except FileNotFoundError:
@@ -378,7 +390,7 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
 
 def main():
-    port = int(os.environ.get("PORT", 8765))
+    port = int(os.environ.get("PORT", 8080))
     host = os.environ.get("HOST", "0.0.0.0")
     
     print("[Server] Starting price updater...")
