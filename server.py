@@ -26,28 +26,32 @@ AI_CONFIG = {
     "max_positions": 3,
     "trade_amount": 100,
     "leverage": 2,
-    "check_interval": 300,  # 5 dakika
+    "check_interval": 30,  # 30 saniye
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
 }
 
 class AITradingBot:
+    SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+
     def __init__(self, state):
         self.state = state
         self.running = False
         self.thread = None
         self.last_analysis = {}
-        self.price_history = {s: [] for s in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]}
+        self.price_history = {s: [] for s in self.SYMBOLS}
+
+    def feed_price(self, symbol, price):
+        """Price updater thread'inden fiyat geçmişini besle"""
+        if price and price > 0:
+            self.price_history[symbol].append(price)
+            if len(self.price_history[symbol]) > 50:
+                self.price_history[symbol].pop(0)
         
     def analyze_market(self, symbol, price_data):
         """Gelişmiş teknik analiz - RSI, trend, momentum"""
         price = price_data.get('price', 0)
         change = price_data.get('change', 0)
-        
-        # Fiyat geçmişini güncelle
-        self.price_history[symbol].append(price)
-        if len(self.price_history[symbol]) > 20:
-            self.price_history[symbol].pop(0)
         
         # Basit RSI hesaplama (14 period)
         rsi = self._calculate_rsi(symbol)
@@ -55,19 +59,23 @@ class AITradingBot:
         # Trend analizi
         trend = self._analyze_trend(symbol)
         
-        # Karar mantığı
-        if rsi < 30 and trend == "up":
-            return "buy", f"RSI aşırı satım ({rsi:.1f}) + yükseliş trendi"
-        elif rsi > 70 and trend == "down":
-            return "sell", f"RSI aşırı alım ({rsi:.1f}) + düşüş trendi"
-        elif change < -5:
+        # Karar mantığı (daha agresif eşikler)
+        if rsi < 40 and trend == "up":
+            return "buy", f"RSI düşük ({rsi:.1f}) + yükseliş trendi"
+        elif rsi > 60 and trend == "down":
+            return "sell", f"RSI yüksek ({rsi:.1f}) + düşüş trendi"
+        elif change < -2:
             return "buy", f"Dip alım fırsatı (%{change:.2f} düşüş)"
-        elif change > 5:
+        elif change > 2:
             return "sell", f"Kar realizasyonu (%{change:.2f} yükseliş)"
-        elif change > 2 and trend == "up":
+        elif change > 1 and trend == "up":
             return "buy", f"Momentum pozitif (+{change:.2f}%)"
-        elif change < -2 and trend == "down":
+        elif change < -1 and trend == "down":
             return "sell", f"Momentum negatif ({change:.2f}%)"
+        elif rsi < 45:
+            return "buy", f"RSI alım bölgesi ({rsi:.1f})"
+        elif rsi > 55:
+            return "sell", f"RSI satım bölgesi ({rsi:.1f})"
         else:
             return "hold", f"Nötr - RSI:{rsi:.1f}, Trend:{trend}"
     
@@ -414,9 +422,20 @@ state = PaperTradingState()
 def price_updater():
     while True:
         state.update_prices()
+        # Bot'un fiyat geçmişini besle
+        for symbol in AITradingBot.SYMBOLS:
+            price = state.prices.get(symbol, {}).get('price', 0)
+            state.ai_bot.feed_price(symbol, price)
         time.sleep(5)
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path

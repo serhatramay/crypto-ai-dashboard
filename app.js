@@ -58,24 +58,129 @@ function initNavigation() {
     });
 }
 
-// Price Feed
+// Price Feed & Full State Polling
 function initPriceFeed() {
-    // Initial render
     renderPrices();
-    
-    // Poll for updates every 2 seconds
-    setInterval(fetchPrices, 2000);
+    setInterval(fetchState, 2000);
 }
 
-async function fetchPrices() {
+async function fetchState() {
     try {
-        const response = await fetch('/api/prices');
-        const prices = await response.json();
-        state.prices = prices;
+        const response = await fetch('/api/state');
+        const data = await response.json();
+
+        state.prices = data.prices || {};
+        state.equity = data.equity || 10000;
+        state.pnl = data.pnl || 0;
+        state.pnl_pct = data.pnl_pct || 0;
+        state.balance = data.balance || 10000;
+        state.serverPositions = data.positions || [];
+        state.serverTrades = data.trades || [];
+        state.totalTrades = data.total_trades || 0;
+        state.winRate = data.win_rate || 0;
+        state.aiAnalysis = data.ai_analysis || {};
+
+        // AI status sync
+        if (data.ai_status && data.ai_status !== state.aiStatus) {
+            state.aiStatus = data.ai_status;
+            syncBotButton();
+        }
+
         renderPrices();
         updateStats();
+        renderPositions();
+        renderTrades();
     } catch (err) {
-        console.error('Failed to fetch prices:', err);
+        console.error('Failed to fetch state:', err);
+    }
+}
+
+function syncBotButton() {
+    const btn = elements.startBotBtn;
+    if (!btn) return;
+    if (state.aiStatus === 'running') {
+        btn.innerHTML = '⏸ Stop Bot';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
+    } else {
+        btn.innerHTML = '▶ Start Bot';
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-primary');
+    }
+}
+
+function renderPositions() {
+    const positionsList = document.getElementById('positions-list');
+    const positionsCountEl = document.getElementById('positions');
+    const positions = state.serverPositions || [];
+
+    if (positionsCountEl) {
+        positionsCountEl.textContent = positions.length;
+    }
+
+    if (!positionsList) return;
+
+    if (positions.length > 0) {
+        positionsList.innerHTML = positions.map(p => `
+            <div class="position-item">
+                <div class="position-header">
+                    <span class="position-symbol">${p.symbol}</span>
+                    <span class="position-side ${p.side}">${p.side.toUpperCase()}</span>
+                </div>
+                <div class="position-details">
+                    <div class="position-detail">
+                        <span class="position-detail-label">Entry</span>
+                        <span class="position-detail-value">$${p.entry.toFixed(2)}</span>
+                    </div>
+                    <div class="position-detail">
+                        <span class="position-detail-label">Current</span>
+                        <span class="position-detail-value">$${p.current_price ? p.current_price.toFixed(2) : p.entry.toFixed(2)}</span>
+                    </div>
+                    <div class="position-detail">
+                        <span class="position-detail-label">Size</span>
+                        <span class="position-detail-value">${p.size.toFixed(4)}</span>
+                    </div>
+                    <div class="position-detail">
+                        <span class="position-detail-label">Leverage</span>
+                        <span class="position-detail-value">${p.leverage}x</span>
+                    </div>
+                    <div class="position-detail">
+                        <span class="position-detail-label">P&L</span>
+                        <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm btn-block" onclick="closePosition(${p.id})" style="margin-top: 12px;">Close Position</button>
+            </div>
+        `).join('');
+    } else {
+        positionsList.innerHTML = '<div class="empty-state">No open positions</div>';
+    }
+}
+
+function renderTrades() {
+    const trades = state.serverTrades || [];
+
+    if (elements.tradesTbody && trades.length > 0) {
+        elements.tradesTbody.innerHTML = trades.map(t => `
+            <tr>
+                <td>${t.time}</td>
+                <td>${t.symbol}</td>
+                <td><span class="trade-type ${t.side === 'buy' ? 'long' : 'short'}">${t.side.toUpperCase()}</span></td>
+                <td>$${t.entry.toFixed(2)}</td>
+                <td>$${t.exit.toFixed(2)}</td>
+                <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)}</td>
+                <td>${t.model}</td>
+            </tr>
+        `).join('');
+    }
+
+    if (elements.winRate) {
+        elements.winRate.textContent = (state.winRate || 0) + '%';
+    }
+
+    const tradesCountEl = document.getElementById('trades-count');
+    if (tradesCountEl) {
+        tradesCountEl.textContent = (state.totalTrades || 0) + ' trades';
     }
 }
 
@@ -188,10 +293,11 @@ async function handleOrderSubmit(e) {
         });
         
         const result = await response.json();
-        
+
         if (result.status === 'ok') {
-            showNotification('Order placed successfully!', 'success');
-            addTradeToTable(order);
+            showNotification(`Position opened: ${result.position.symbol} ${result.position.side.toUpperCase()} @ $${result.position.entry.toFixed(2)}`, 'success');
+        } else if (result.error) {
+            showNotification(result.error, 'error');
         }
     } catch (err) {
         showNotification('Failed to place order', 'error');
@@ -294,8 +400,6 @@ async function closePosition(positionId) {
         
         if (result.status === 'ok') {
             showNotification(`Position closed! P&L: ${result.trade.pnl >= 0 ? '+' : ''}$${Math.abs(result.trade.pnl).toFixed(2)}`, 'success');
-            // Refresh data
-            loadInitialData();
         } else {
             showNotification('Failed to close position: ' + (result.error || 'Unknown error'), 'error');
         }
@@ -306,21 +410,27 @@ async function closePosition(positionId) {
 
 // Stats & Data
 function updateStats() {
-    // Calculate stats from state
     const equity = state.equity || 10000;
     const pnl = state.pnl || 0;
     const pnlPct = state.pnl_pct || 0;
-    
+    const initialBalance = 10000;
+    const equityPct = ((equity - initialBalance) / initialBalance) * 100;
+
     if (elements.equity) {
-        elements.equity.textContent = `$${equity.toFixed(2)}`;
+        elements.equity.textContent = `$${equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     }
-    
+
+    const equityChangeEl = document.getElementById('equity-change');
+    if (equityChangeEl) {
+        equityChangeEl.textContent = `${equityPct >= 0 ? '+' : ''}${equityPct.toFixed(2)}%`;
+        equityChangeEl.className = 'stat-change ' + (equityPct >= 0 ? 'positive' : 'negative');
+    }
+
     if (elements.pnl) {
-        elements.pnl.textContent = `${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}`;
+        elements.pnl.textContent = `${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
         elements.pnl.className = 'stat-value ' + (pnl >= 0 ? 'positive' : 'negative');
     }
-    
-    // Update P&L percentage
+
     const pnlChangeEl = document.getElementById('pnl-change');
     if (pnlChangeEl) {
         pnlChangeEl.textContent = `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`;
@@ -328,111 +438,9 @@ function updateStats() {
     }
 }
 
-function addTradeToTable(trade) {
-    const row = document.createElement('tr');
-    row.innerHTML = `
-        <td>${new Date().toLocaleTimeString()}</td>
-        <td>${trade.symbol}</td>
-        <td><span class="trade-type ${trade.side === 'buy' ? 'long' : 'short'}">${trade.side.toUpperCase()}</span></td>
-        <td>$${(Math.random() * 50000 + 30000).toFixed(2)}</td>
-        <td>--</td>
-        <td class="trade-pnl">--</td>
-        <td>${state.selectedModel}</td>
-    `;
-    
-    if (elements.tradesTbody) {
-        elements.tradesTbody.insertBefore(row, elements.tradesTbody.firstChild);
-        
-        // Keep only last 20 rows
-        while (elements.tradesTbody.children.length > 20) {
-            elements.tradesTbody.removeChild(elements.tradesTbody.lastChild);
-        }
-    }
-}
-
 function loadInitialData() {
-    // Load initial trades from server state
-    fetch('/api/state')
-        .then(r => r.json())
-        .then(data => {
-            const trades = data.trades || [];
-            
-            if (elements.tradesTbody && trades.length > 0) {
-                elements.tradesTbody.innerHTML = trades.map(t => `
-                    <tr>
-                        <td>${t.time}</td>
-                        <td>${t.symbol}</td>
-                        <td><span class="trade-type ${t.side === 'buy' ? 'long' : 'short'}">${t.side.toUpperCase()}</span></td>
-                        <td>$${t.entry.toFixed(2)}</td>
-                        <td>$${t.exit.toFixed(2)}</td>
-                        <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)}</td>
-                        <td>${t.model}</td>
-                    </tr>
-                `).join('');
-                
-                // Calculate real win rate
-                const winningTrades = trades.filter(t => t.pnl > 0).length;
-                const winRate = trades.length > 0 ? (winningTrades / trades.length * 100).toFixed(1) : 0;
-                
-                if (elements.winRate) {
-                    elements.winRate.textContent = winRate + '%';
-                }
-                
-                const tradesCountEl = document.getElementById('trades-count');
-                if (tradesCountEl) {
-                    tradesCountEl.textContent = trades.length + ' trades';
-                }
-            }
-            
-            // Update positions count and render positions
-            if (data.positions) {
-                const positionsCountEl = document.getElementById('positions');
-                if (positionsCountEl) {
-                    positionsCountEl.textContent = data.positions.length;
-                }
-                
-                // Render positions in Trading tab
-                const positionsList = document.getElementById('positions-list');
-                if (positionsList) {
-                    if (data.positions && data.positions.length > 0) {
-                        positionsList.innerHTML = data.positions.map(p => `
-                            <div class="position-item">
-                                <div class="position-header">
-                                    <span class="position-symbol">${p.symbol}</span>
-                                    <span class="position-side ${p.side}">${p.side.toUpperCase()}</span>
-                                </div>
-                                <div class="position-details">
-                                    <div class="position-detail">
-                                        <span class="position-detail-label">Entry</span>
-                                        <span class="position-detail-value">$${p.entry.toFixed(2)}</span>
-                                    </div>
-                                    <div class="position-detail">
-                                        <span class="position-detail-label">Current</span>
-                                        <span class="position-detail-value">$${p.current_price ? p.current_price.toFixed(2) : p.entry.toFixed(2)}</span>
-                                    </div>
-                                    <div class="position-detail">
-                                        <span class="position-detail-label">Size</span>
-                                        <span class="position-detail-value">${p.size.toFixed(4)}</span>
-                                    </div>
-                                    <div class="position-detail">
-                                        <span class="position-detail-label">Leverage</span>
-                                        <span class="position-detail-value">${p.leverage}x</span>
-                                    </div>
-                                    <div class="position-detail">
-                                        <span class="position-detail-label">P&L</span>
-                                        <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
-                                    </div>
-                                </div>
-                                <button class="btn btn-secondary btn-sm btn-block" onclick="closePosition(${p.id})" style="margin-top: 12px;">Close Position</button>
-                            </div>
-                        `).join('');
-                    } else {
-                        positionsList.innerHTML = '<div class="empty-state">No open positions</div>';
-                    }
-                }
-            }
-        })
-        .catch(err => console.error('Failed to load initial data:', err));
+    // İlk yükleme - fetchState zaten her şeyi hallediyor
+    fetchState();
 }
 
 // Notifications
