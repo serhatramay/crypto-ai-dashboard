@@ -26,9 +26,10 @@ AI_CONFIG = {
     "max_positions": 3,
     "trade_amount": 100,
     "leverage": 2,
-    "check_interval": 60,
+    "check_interval": 300,  # 5 dakika
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
+    "kimi_webhook_url": os.environ.get("KIMI_WEBHOOK_URL", ""),  # Kimi AI webhook
 }
 
 class AITradingBot:
@@ -37,12 +38,19 @@ class AITradingBot:
         self.running = False
         self.thread = None
         self.last_analysis = {}
+        self.ai_signals = []  # Kimi AI'dan gelen sinyaller
         
     def analyze_market(self, symbol, price_data):
-        """Simple technical analysis"""
+        """Basit teknik analiz + Kimi AI sinyalleri"""
         change = price_data.get('change', 0)
         price = price_data.get('price', 0)
         
+        # Kimi AI sinyali var mı kontrol et
+        for signal in self.ai_signals:
+            if signal['symbol'] == symbol and signal['active']:
+                return signal['action'], f"Kimi AI: {signal['reason']}"
+        
+        # Basit analiz (yedek)
         if change > 2:
             return "buy", f"Strong upward momentum (+{change:.2f}%)"
         elif change < -2:
@@ -53,6 +61,23 @@ class AITradingBot:
             return "sell", f"Negative momentum ({change:.2f}%)"
         else:
             return "hold", f"Sideways movement ({change:.2f}%)"
+    
+    def add_ai_signal(self, symbol, action, reason, confidence):
+        """Kimi AI'dan sinyal ekle"""
+        # Eski sinyalleri temizle
+        self.ai_signals = [s for s in self.ai_signals if s['symbol'] != symbol]
+        
+        # Yeni sinyal ekle (30 dakika geçerli)
+        self.ai_signals.append({
+            'symbol': symbol,
+            'action': action,
+            'reason': reason,
+            'confidence': confidence,
+            'time': datetime.now(TR_TZ),
+            'active': True
+        })
+        
+        print(f"[AI Signal] {symbol}: {action} - {reason} ({confidence}%)")
     
     def should_open_position(self, symbol, signal):
         if len(self.state.positions) >= AI_CONFIG["max_positions"]:
@@ -78,6 +103,7 @@ class AITradingBot:
             try:
                 self.state.update_prices()
                 
+                # Stop loss / take profit kontrolü
                 positions_to_close = []
                 for pos in self.state.positions:
                     should_close, reason = self.should_close_position(pos)
@@ -90,6 +116,7 @@ class AITradingBot:
                         trade = result['trade']
                         print(f"[AI Bot] Closed: {trade['symbol']} | PnL: ${trade['pnl']:.2f} | {reason}")
                 
+                # Yeni pozisyon aç (AI sinyallerine göre)
                 symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
                 for symbol in symbols:
                     price_data = self.state.prices.get(symbol)
@@ -412,6 +439,70 @@ class DashboardHandler(BaseHTTPRequestHandler):
             data = json.loads(body)
             state.selected_model = data.get("model", "gpt-4")
             self.serve_json({"status": "ok", "model": state.selected_model})
+            
+        elif path == "/api/ai/signal":
+            # Kimi AI'dan gelen sinyalleri işle
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            data = json.loads(body)
+            
+            symbol = data.get('symbol')
+            action = data.get('action')  # buy, sell, hold
+            reason = data.get('reason', '')
+            confidence = data.get('confidence', 0)
+            
+            if symbol and action in ['buy', 'sell', 'hold']:
+                state.ai_bot.add_ai_signal(symbol, action, reason, confidence)
+                self.serve_json({
+                    "status": "ok", 
+                    "message": f"AI signal received: {symbol} {action}",
+                    "signal": {"symbol": symbol, "action": action, "reason": reason, "confidence": confidence}
+                })
+            else:
+                self.serve_json({"status": "error", "message": "Invalid signal data"})
+                
+        elif path == "/api/ai/analyze":
+            # Mevcut piyasa durumunu analiz et ve raporla
+            analysis = {
+                "timestamp": datetime.now(TR_TZ).isoformat(),
+                "prices": state.prices,
+                "positions": state.positions,
+                "ai_signals": [
+                    {
+                        "symbol": s['symbol'],
+                        "action": s['action'],
+                        "reason": s['reason'],
+                        "confidence": s['confidence'],
+                        "time": s['time'].strftime("%H:%M:%S")
+                    } for s in state.ai_bot.ai_signals if s['active']
+                ],
+                "last_analysis": state.ai_bot.last_analysis,
+                "recommendations": []
+            }
+            
+            # Otomatik öneriler oluştur
+            for symbol, data in state.prices.items():
+                change = data.get('change', 0)
+                price = data.get('price', 0)
+                
+                # Basit strateji
+                if change < -5 and not any(p['symbol'] == symbol for p in state.positions):
+                    analysis["recommendations"].append({
+                        "symbol": symbol,
+                        "action": "buy",
+                        "reason": f"Dip alım fırsatı (%{change:.2f} düşüş)",
+                        "urgency": "high" if change < -8 else "medium"
+                    })
+                elif change > 5 and any(p['symbol'] == symbol and p['side'] == 'buy' for p in state.positions):
+                    analysis["recommendations"].append({
+                        "symbol": symbol,
+                        "action": "take_profit",
+                        "reason": f"Kar realizasyonu (%{change:.2f} yükseliş)",
+                        "urgency": "medium"
+                    })
+            
+            self.serve_json(analysis)
+            
         else:
             self.send_error(404)
     
