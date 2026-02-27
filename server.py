@@ -267,28 +267,34 @@ class AITradingBot:
         for symbol in self.SYMBOLS:
             coin = self.SYMBOL_MAP[symbol]
             # Birden fazla API dene
+            coin_ids = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "XRP": "ripple"}
+            coin_id = coin_ids.get(coin, coin.lower())
             apis = [
-                f'https://min-api.cryptocompare.com/data/v2/histohour?fsym={coin}&tsym=USD&limit=200',
-                f'https://api.binance.us/api/v3/klines?symbol={symbol}&interval=1h&limit=200',
+                ("cryptocompare", f'https://min-api.cryptocompare.com/data/v2/histohour?fsym={coin}&tsym=USD&limit=200'),
+                ("coingecko", f'https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=8'),
+                ("binance", f'https://api.binance.us/api/v3/klines?symbol={symbol}&interval=1h&limit=200'),
             ]
-            for api_url in apis:
+            for api_name, api_url in apis:
                 try:
-                    req = request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    req = request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'})
                     with request.urlopen(req, timeout=15) as resp:
                         raw = json.loads(resp.read().decode())
-                        if 'Data' in raw:
-                            # CryptoCompare format
+                        if api_name == "cryptocompare" and 'Data' in raw:
                             candles = raw.get('Data', {}).get('Data', [])
                             self.candle_closes[symbol] = [c['close'] for c in candles if c.get('close')]
                             self.candle_volumes[symbol] = [c.get('volumeto', 0) for c in candles]
-                        elif isinstance(raw, list) and len(raw) > 0:
-                            # Binance format: [time, open, high, low, close, volume, ...]
+                        elif api_name == "coingecko" and 'prices' in raw:
+                            self.candle_closes[symbol] = [p[1] for p in raw['prices']]
+                            vols = raw.get('total_volumes', [])
+                            self.candle_volumes[symbol] = [v[1] for v in vols] if vols else []
+                        elif api_name == "binance" and isinstance(raw, list) and len(raw) > 0:
                             self.candle_closes[symbol] = [float(c[4]) for c in raw]
                             self.candle_volumes[symbol] = [float(c[5]) for c in raw]
-                        print(f"  [OK] {symbol}: {len(self.candle_closes[symbol])} candles")
-                        break
+                        if self.candle_closes.get(symbol):
+                            print(f"  [OK] {symbol} via {api_name}: {len(self.candle_closes[symbol])} candles")
+                            break
                 except Exception as e:
-                    print(f"  [RETRY] {symbol} from {api_url[:40]}...: {e}")
+                    print(f"  [RETRY] {symbol} via {api_name}: {e}")
                     continue
             if not self.candle_closes.get(symbol):
                 print(f"  [FAIL] {symbol}: No historical data available")
@@ -331,29 +337,63 @@ class AITradingBot:
             live = self.price_history.get(symbol, [])
             if len(live) < 5:
                 return "hold", "Veri bekleniyor...", 0, {}
-            # Basit analiz - change bazlı
+            # Basit analiz - iki strateji: trend takip + dip alım
             rsi_simple = TechnicalAnalyzer.rsi(live, min(14, len(live) - 1)) if len(live) > 3 else 50
             fg = self.fear_greed.get('value', 50)
+
+            # Kısa vadeli momentum (son fiyatlar yükseliyor mu düşüyor mu)
+            momentum = 0
+            if len(live) >= 6:
+                recent_avg = sum(live[-3:]) / 3
+                older_avg = sum(live[-6:-3]) / 3
+                if older_avg > 0:
+                    momentum = (recent_avg - older_avg) / older_avg * 100
+
             score = 0
             reasons = []
-            if change_24h < -2:
+
+            # Trend takip: güçlü düşüş + negatif momentum = SHORT
+            if change_24h < -4 and momentum < -0.05:
+                score -= 50
+                reasons.append(f"Güçlü düşüş:{change_24h:.1f}%")
+            # Dip alım: düşüş ama momentum toparlanıyor = LONG
+            elif change_24h < -2 and momentum >= 0:
                 score += 40
-                reasons.append(f"Düşüş:{change_24h:.1f}%")
-            elif change_24h > 2:
-                score -= 40
-                reasons.append(f"Yükseliş:{change_24h:.1f}%")
-            if rsi_simple < 35:
-                score += 30
-                reasons.append(f"RSI:{rsi_simple:.0f}")
-            elif rsi_simple > 65:
+                reasons.append(f"Dip alım:{change_24h:.1f}%")
+            # Düşüş + düşüş momentum = SHORT devam
+            elif change_24h < -2 and momentum < 0:
                 score -= 30
+                reasons.append(f"Trend düşüş:{change_24h:.1f}%")
+            # Güçlü yükseliş + pozitif momentum = LONG
+            elif change_24h > 4 and momentum > 0.05:
+                score += 50
+                reasons.append(f"Güçlü yükseliş:{change_24h:.1f}%")
+            # Yükseliş ama momentum zayıflıyor = SHORT
+            elif change_24h > 2 and momentum <= 0:
+                score -= 40
+                reasons.append(f"Zirve:{change_24h:.1f}%")
+            # Yükseliş + pozitif momentum = LONG devam
+            elif change_24h > 2 and momentum > 0:
+                score += 30
+                reasons.append(f"Trend yükseliş:{change_24h:.1f}%")
+
+            if rsi_simple < 30:
+                score += 25
                 reasons.append(f"RSI:{rsi_simple:.0f}")
-            if fg < 25:
-                score += 20
+            elif rsi_simple > 70:
+                score -= 25
+                reasons.append(f"RSI:{rsi_simple:.0f}")
+
+            # F&G aşırılıklarda sinyali güçlendirir
+            if fg < 20 and score > 0:
+                score += 15
                 reasons.append(f"F&G:{fg}")
-            elif fg > 75:
-                score -= 20
+            elif fg > 80 and score < 0:
+                score -= 15
                 reasons.append(f"F&G:{fg}")
+
+            if momentum != 0:
+                reasons.append(f"Mom:{'↑' if momentum > 0 else '↓'}{abs(momentum):.2f}%")
 
             if score > 10:
                 signal, lev = "buy", 15
