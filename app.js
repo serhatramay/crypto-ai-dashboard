@@ -137,7 +137,7 @@ function renderPositions() {
                     <td style="color: var(--accent-success)">$${fmt(tpPrice)}</td>
                     <td style="color: var(--accent-danger)">$${fmt(slPrice)}</td>
                     <td>${p.leverage}x</td>
-                    <td class="trade-pnl ${p.pnl >= 0 ? 'positive' : 'negative'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)} (${pnlPct}%)</td>
+                    <td class="trade-pnl ${p.pnl >= 0 ? 'positive' : 'negative'}">${p.pnl >= 0 ? '+' : '-'}$${Math.abs(p.pnl).toFixed(2)} (${pnlPct}%)</td>
                     <td><button class="btn btn-secondary btn-sm" onclick="closePosition(${p.id})">Kapat</button></td>
                 </tr>`;
             }).join('');
@@ -174,7 +174,7 @@ function renderPositions() {
                         </div>
                         <div class="position-detail">
                             <span class="position-detail-label">P&L</span>
-                            <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)}</span>
+                            <span class="position-detail-value" style="color: ${p.pnl >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${p.pnl >= 0 ? '+' : '-'}$${Math.abs(p.pnl).toFixed(2)}</span>
                         </div>
                     </div>
                     <button class="btn btn-secondary btn-sm btn-block" onclick="closePosition(${p.id})" style="margin-top: 12px;">Kapat</button>
@@ -201,7 +201,7 @@ function renderTrades() {
                 <td>$${t.entry.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                 <td>$${t.exit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                 <td>${t.leverage || '-'}x</td>
-                <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)} (${leveragePnlPct}%)</td>
+                <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : '-'}$${Math.abs(t.pnl).toFixed(2)} (${leveragePnlPct}%)</td>
             </tr>`;
         }).join('');
     } else if (elements.tradesTbody) {
@@ -433,7 +433,7 @@ async function closePosition(positionId) {
         const result = await response.json();
         
         if (result.status === 'ok') {
-            showNotification(`Position closed! P&L: ${result.trade.pnl >= 0 ? '+' : ''}$${Math.abs(result.trade.pnl).toFixed(2)}`, 'success');
+            showNotification(`Position closed! P&L: ${result.trade.pnl >= 0 ? '+' : '-'}$${Math.abs(result.trade.pnl).toFixed(2)}`, 'success');
         } else {
             showNotification('Failed to close position: ' + (result.error || 'Unknown error'), 'error');
         }
@@ -461,7 +461,7 @@ function updateStats() {
     }
 
     if (elements.pnl) {
-        elements.pnl.textContent = `${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        elements.pnl.textContent = `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
         elements.pnl.className = 'stat-value ' + (pnl >= 0 ? 'positive' : 'negative');
     }
 

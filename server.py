@@ -80,64 +80,92 @@ def init_db():
     conn.close()
 
 def db_save_trade(trade):
-    conn = get_conn()
-    cur = conn.cursor()
-    if DATABASE_URL:
-        cur.execute(
-            "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
-             trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
-             trade.get('leverage', 1), trade['model'])
-        )
-    else:
-        cur.execute(
-            "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (?,?,?,?,?,?,?,?,?)",
-            (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
-             trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
-             trade.get('leverage', 1), trade['model'])
-        )
-        conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute(
+                "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
+                 trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
+                 trade.get('leverage', 1), trade['model'])
+            )
+        else:
+            cur.execute(
+                "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (?,?,?,?,?,?,?,?,?)",
+                (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
+                 trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
+                 trade.get('leverage', 1), trade['model'])
+            )
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Error saving trade: {e}")
 
 def db_save_position(pos):
-    conn = get_conn()
-    cur = conn.cursor()
-    if DATABASE_URL:
-        cur.execute(
-            "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
-            (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
-        )
-    else:
-        cur.execute(
-            "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (?,?,?,?,?,?,?,?)",
-            (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
-        )
-        conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute(
+                "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
+                (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
+            )
+        else:
+            cur.execute(
+                "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (?,?,?,?,?,?,?,?)",
+                (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
+            )
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Error saving position: {e}")
 
 def db_remove_position(pos_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    if DATABASE_URL:
-        cur.execute("DELETE FROM positions WHERE id = %s", (pos_id,))
-    else:
-        cur.execute("DELETE FROM positions WHERE id = ?", (pos_id,))
-        conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute("DELETE FROM positions WHERE id = %s", (pos_id,))
+        else:
+            cur.execute("DELETE FROM positions WHERE id = ?", (pos_id,))
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Error removing position: {e}")
 
 def db_save_balance(balance):
-    conn = get_conn()
-    cur = conn.cursor()
-    if DATABASE_URL:
-        cur.execute("INSERT INTO state (key, value) VALUES ('balance', %s) ON CONFLICT (key) DO UPDATE SET value = %s", (balance, balance))
-    else:
-        cur.execute("INSERT OR REPLACE INTO state (key, value) VALUES ('balance', ?)", (balance,))
-        conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute("INSERT INTO state (key, value) VALUES ('balance', %s) ON CONFLICT (key) DO UPDATE SET value = %s", (balance, balance))
+        else:
+            cur.execute("INSERT OR REPLACE INTO state (key, value) VALUES ('balance', ?)", (balance,))
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Error saving balance: {e}")
+
+def db_reset():
+    """Tüm verileri sıfırla - temiz başlangıç"""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM trades")
+        cur.execute("DELETE FROM positions")
+        cur.execute("DELETE FROM state")
+        if not DATABASE_URL:
+            conn.commit()
+        cur.close()
+        conn.close()
+        print("[DB] Database reset complete")
+    except Exception as e:
+        print(f"[DB] Error resetting: {e}")
 
 def db_load_all():
     """Sunucu başlangıcında tüm verileri yükle"""
@@ -923,7 +951,7 @@ class PaperTradingState:
             else:
                 price_diff = pos['entry'] - current_price
 
-            pos['pnl'] = price_diff * pos['size'] * pos['leverage']
+            pos['pnl'] = price_diff * pos['size']
             pos['current_price'] = current_price
 
             # Hedef fiyatları hesapla (take profit / stop loss)
@@ -931,8 +959,8 @@ class PaperTradingState:
             size = pos['size']
             leverage = pos['leverage']
             margin = pos['margin']
-            tp_delta = (margin * AI_CONFIG["take_profit_pct"] / 100) / (size * leverage)
-            sl_delta = (margin * AI_CONFIG["stop_loss_pct"] / 100) / (size * leverage)
+            tp_delta = (margin * AI_CONFIG["take_profit_pct"] / 100) / size
+            sl_delta = (margin * AI_CONFIG["stop_loss_pct"] / 100) / size
 
             if pos['side'] == 'buy':
                 pos['tp_price'] = entry + tp_delta
@@ -1131,7 +1159,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             data = json.loads(body)
             state.selected_model = data.get("model", "gpt-4")
             self.serve_json({"status": "ok", "model": state.selected_model})
-            
+
+        elif path == "/api/reset":
+            db_reset()
+            state.balance = state.initial_balance
+            state.positions = []
+            state.trades = []
+            db_save_balance(state.balance)
+            self.serve_json({"status": "ok", "message": "All data reset to $10,000"})
+
         else:
             self.send_error(404)
     
