@@ -621,6 +621,8 @@ class AITradingBot:
         self.fetch_fear_greed()
 
         fg_timer = 0
+        candle_timer = 0
+        retry_history = 0
 
         while self.running:
             try:
@@ -628,9 +630,32 @@ class AITradingBot:
 
                 # Fear & Greed her 30 dakikada güncelle
                 fg_timer += 1
-                if fg_timer >= 60:  # 60 * 30sn = 30dk
+                if fg_timer >= 60:
                     self.fetch_fear_greed()
                     fg_timer = 0
+
+                # Tarihsel veri yoksa 5 dakikada bir tekrar dene
+                if not self.data_ready:
+                    retry_history += 1
+                    if retry_history >= 10:  # 10 * 30sn = 5dk
+                        print("[AI Bot] Retrying historical data fetch...")
+                        self.fetch_historical_candles()
+                        retry_history = 0
+
+                # Canlı fiyatlardan mum verisi biriktir (her 2 dakikada bir)
+                candle_timer += 1
+                if candle_timer >= 4:  # 4 * 30sn = 2dk
+                    for sym in self.SYMBOLS:
+                        live = self.price_history.get(sym, [])
+                        if live:
+                            self.candle_closes[sym].append(live[-1])
+                            if len(self.candle_closes[sym]) > 300:
+                                self.candle_closes[sym].pop(0)
+                    candle_timer = 0
+                    total_candles = sum(len(v) for v in self.candle_closes.values())
+                    if total_candles > 120 and not self.data_ready:
+                        self.data_ready = True
+                        print(f"[AI Bot] Live candle data ready! Switching to FULL analysis mode")
 
                 # Stop loss / take profit / ters sinyal kontrolü
                 positions_to_close = []
