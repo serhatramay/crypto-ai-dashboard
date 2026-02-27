@@ -29,7 +29,6 @@ AI_CONFIG = {
     "check_interval": 300,  # 5 dakika
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
-    "kimi_webhook_url": os.environ.get("KIMI_WEBHOOK_URL", ""),  # Kimi AI webhook
 }
 
 class AITradingBot:
@@ -38,46 +37,81 @@ class AITradingBot:
         self.running = False
         self.thread = None
         self.last_analysis = {}
-        self.ai_signals = []  # Kimi AI'dan gelen sinyaller
+        self.price_history = {s: [] for s in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]}
         
     def analyze_market(self, symbol, price_data):
-        """Basit teknik analiz + Kimi AI sinyalleri"""
-        change = price_data.get('change', 0)
+        """Gelişmiş teknik analiz - RSI, trend, momentum"""
         price = price_data.get('price', 0)
+        change = price_data.get('change', 0)
         
-        # Kimi AI sinyali var mı kontrol et
-        for signal in self.ai_signals:
-            if signal['symbol'] == symbol and signal['active']:
-                return signal['action'], f"Kimi AI: {signal['reason']}"
+        # Fiyat geçmişini güncelle
+        self.price_history[symbol].append(price)
+        if len(self.price_history[symbol]) > 20:
+            self.price_history[symbol].pop(0)
         
-        # Basit analiz (yedek)
-        if change > 2:
-            return "buy", f"Strong upward momentum (+{change:.2f}%)"
-        elif change < -2:
-            return "sell", f"Strong downward momentum ({change:.2f}%)"
-        elif change > 0.5:
-            return "buy", f"Positive momentum (+{change:.2f}%)"
-        elif change < -0.5:
-            return "sell", f"Negative momentum ({change:.2f}%)"
+        # Basit RSI hesaplama (14 period)
+        rsi = self._calculate_rsi(symbol)
+        
+        # Trend analizi
+        trend = self._analyze_trend(symbol)
+        
+        # Karar mantığı
+        if rsi < 30 and trend == "up":
+            return "buy", f"RSI aşırı satım ({rsi:.1f}) + yükseliş trendi"
+        elif rsi > 70 and trend == "down":
+            return "sell", f"RSI aşırı alım ({rsi:.1f}) + düşüş trendi"
+        elif change < -5:
+            return "buy", f"Dip alım fırsatı (%{change:.2f} düşüş)"
+        elif change > 5:
+            return "sell", f"Kar realizasyonu (%{change:.2f} yükseliş)"
+        elif change > 2 and trend == "up":
+            return "buy", f"Momentum pozitif (+{change:.2f}%)"
+        elif change < -2 and trend == "down":
+            return "sell", f"Momentum negatif ({change:.2f}%)"
         else:
-            return "hold", f"Sideways movement ({change:.2f}%)"
+            return "hold", f"Nötr - RSI:{rsi:.1f}, Trend:{trend}"
     
-    def add_ai_signal(self, symbol, action, reason, confidence):
-        """Kimi AI'dan sinyal ekle"""
-        # Eski sinyalleri temizle
-        self.ai_signals = [s for s in self.ai_signals if s['symbol'] != symbol]
+    def _calculate_rsi(self, symbol, period=14):
+        """Basit RSI hesaplama"""
+        prices = self.price_history[symbol]
+        if len(prices) < period + 1:
+            return 50  # Yetersiz veri
         
-        # Yeni sinyal ekle (30 dakika geçerli)
-        self.ai_signals.append({
-            'symbol': symbol,
-            'action': action,
-            'reason': reason,
-            'confidence': confidence,
-            'time': datetime.now(TR_TZ),
-            'active': True
-        })
+        gains = []
+        losses = []
         
-        print(f"[AI Signal] {symbol}: {action} - {reason} ({confidence}%)")
+        for i in range(1, min(period + 1, len(prices))):
+            change = prices[-i] - prices[-i-1]
+            if change > 0:
+                gains.append(change)
+            else:
+                losses.append(abs(change))
+        
+        avg_gain = sum(gains) / period if gains else 0
+        avg_loss = sum(losses) / period if losses else 0
+        
+        if avg_loss == 0:
+            return 100
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def _analyze_trend(self, symbol):
+        """Basit trend analizi"""
+        prices = self.price_history[symbol]
+        if len(prices) < 5:
+            return "neutral"
+        
+        # Son 5 fiyatın ortalaması vs önceki 5'in ortalaması
+        recent = sum(prices[-5:]) / 5
+        previous = sum(prices[-10:-5]) / 5 if len(prices) >= 10 else prices[0]
+        
+        if recent > previous * 1.02:
+            return "up"
+        elif recent < previous * 0.98:
+            return "down"
+        return "neutral"
     
     def should_open_position(self, symbol, signal):
         if len(self.state.positions) >= AI_CONFIG["max_positions"]:
@@ -116,7 +150,7 @@ class AITradingBot:
                         trade = result['trade']
                         print(f"[AI Bot] Closed: {trade['symbol']} | PnL: ${trade['pnl']:.2f} | {reason}")
                 
-                # Yeni pozisyon aç (AI sinyallerine göre)
+                # Yeni pozisyon aç (AI analizine göre)
                 symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
                 for symbol in symbols:
                     price_data = self.state.prices.get(symbol)
@@ -439,69 +473,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             data = json.loads(body)
             state.selected_model = data.get("model", "gpt-4")
             self.serve_json({"status": "ok", "model": state.selected_model})
-            
-        elif path == "/api/ai/signal":
-            # Kimi AI'dan gelen sinyalleri işle
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length)
-            data = json.loads(body)
-            
-            symbol = data.get('symbol')
-            action = data.get('action')  # buy, sell, hold
-            reason = data.get('reason', '')
-            confidence = data.get('confidence', 0)
-            
-            if symbol and action in ['buy', 'sell', 'hold']:
-                state.ai_bot.add_ai_signal(symbol, action, reason, confidence)
-                self.serve_json({
-                    "status": "ok", 
-                    "message": f"AI signal received: {symbol} {action}",
-                    "signal": {"symbol": symbol, "action": action, "reason": reason, "confidence": confidence}
-                })
-            else:
-                self.serve_json({"status": "error", "message": "Invalid signal data"})
-                
-        elif path == "/api/ai/analyze":
-            # Mevcut piyasa durumunu analiz et ve raporla
-            analysis = {
-                "timestamp": datetime.now(TR_TZ).isoformat(),
-                "prices": state.prices,
-                "positions": state.positions,
-                "ai_signals": [
-                    {
-                        "symbol": s['symbol'],
-                        "action": s['action'],
-                        "reason": s['reason'],
-                        "confidence": s['confidence'],
-                        "time": s['time'].strftime("%H:%M:%S")
-                    } for s in state.ai_bot.ai_signals if s['active']
-                ],
-                "last_analysis": state.ai_bot.last_analysis,
-                "recommendations": []
-            }
-            
-            # Otomatik öneriler oluştur
-            for symbol, data in state.prices.items():
-                change = data.get('change', 0)
-                price = data.get('price', 0)
-                
-                # Basit strateji
-                if change < -5 and not any(p['symbol'] == symbol for p in state.positions):
-                    analysis["recommendations"].append({
-                        "symbol": symbol,
-                        "action": "buy",
-                        "reason": f"Dip alım fırsatı (%{change:.2f} düşüş)",
-                        "urgency": "high" if change < -8 else "medium"
-                    })
-                elif change > 5 and any(p['symbol'] == symbol and p['side'] == 'buy' for p in state.positions):
-                    analysis["recommendations"].append({
-                        "symbol": symbol,
-                        "action": "take_profit",
-                        "reason": f"Kar realizasyonu (%{change:.2f} yükseliş)",
-                        "urgency": "medium"
-                    })
-            
-            self.serve_json(analysis)
             
         else:
             self.send_error(404)
