@@ -1023,8 +1023,9 @@ class PaperTradingState:
     
     def get_equity(self):
         self.update_position_pnl()
-        total_pnl = sum(p['pnl'] for p in self.positions)
-        return self.balance + total_pnl
+        # Equity = balance + açık pozisyonların (margin + pnl) toplamı
+        positions_value = sum(p['margin'] + p['pnl'] for p in self.positions)
+        return self.balance + positions_value
     
     def get_state(self):
         with self.lock:
