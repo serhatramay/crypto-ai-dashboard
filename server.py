@@ -27,7 +27,7 @@ def init_db():
     conn.execute("""CREATE TABLE IF NOT EXISTS trades (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         time TEXT, date TEXT, symbol TEXT, side TEXT,
-        entry REAL, exit_price REAL, pnl REAL, model TEXT
+        entry REAL, exit_price REAL, pnl REAL, leverage INTEGER DEFAULT 1, model TEXT
     )""")
     conn.execute("""CREATE TABLE IF NOT EXISTS positions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,9 +44,10 @@ def init_db():
 def db_save_trade(trade):
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(
-        "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, model) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (?,?,?,?,?,?,?,?,?)",
         (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
-         trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'], trade['model'])
+         trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
+         trade.get('leverage', 1), trade['model'])
     )
     conn.commit()
     conn.close()
@@ -82,7 +83,8 @@ def db_load_all():
         trades.append({
             "time": row['time'], "date": row['date'], "symbol": row['symbol'],
             "side": row['side'], "entry": row['entry'], "exit": row['exit_price'],
-            "pnl": row['pnl'], "model": row['model']
+            "pnl": row['pnl'], "leverage": row['leverage'] if 'leverage' in row.keys() else 1,
+            "model": row['model']
         })
 
     positions = []
@@ -107,7 +109,7 @@ TR_TZ = timezone(timedelta(hours=3))
 AI_CONFIG = {
     "max_positions": 3,
     "trade_amount": 100,
-    "leverage": 2,
+    "leverage": 10,
     "check_interval": 30,  # 30 saniye
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
@@ -465,6 +467,7 @@ class PaperTradingState:
                 "side": pos['side'],
                 "entry": pos['entry'],
                 "exit": pos['current_price'],
+                "leverage": pos['leverage'],
                 "pnl": final_pnl,
                 "model": self.selected_model
             }

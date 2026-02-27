@@ -161,17 +161,22 @@ function renderTrades() {
     const trades = state.serverTrades || [];
 
     if (elements.tradesTbody && trades.length > 0) {
-        elements.tradesTbody.innerHTML = trades.map(t => `
+        elements.tradesTbody.innerHTML = trades.map(t => {
+            const pnlPct = t.entry ? ((t.exit - t.entry) / t.entry * 100 * (t.side === 'buy' ? 1 : -1)).toFixed(2) : '0.00';
+            const leveragePnlPct = (parseFloat(pnlPct) * (t.leverage || 1)).toFixed(2);
+            return `
             <tr>
-                <td>${t.time}</td>
-                <td>${t.symbol}</td>
-                <td><span class="trade-type ${t.side === 'buy' ? 'long' : 'short'}">${t.side.toUpperCase()}</span></td>
-                <td>$${t.entry.toFixed(2)}</td>
-                <td>$${t.exit.toFixed(2)}</td>
-                <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)}</td>
-                <td>${t.model}</td>
-            </tr>
-        `).join('');
+                <td>${t.date || ''} ${t.time}</td>
+                <td>${t.symbol.replace('USDT', '')}</td>
+                <td><span class="trade-type ${t.side === 'buy' ? 'long' : 'short'}">${t.side === 'buy' ? 'LONG' : 'SHORT'}</span></td>
+                <td>$${t.entry.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td>$${t.exit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td>${t.leverage || '-'}x</td>
+                <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)} (${leveragePnlPct}%)</td>
+            </tr>`;
+        }).join('');
+    } else if (elements.tradesTbody) {
+        elements.tradesTbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 20px;">Henüz trade yok - Bot çalışınca burada görünecek</td></tr>';
     }
 
     if (elements.winRate) {

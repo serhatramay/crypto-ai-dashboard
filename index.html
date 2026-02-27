@@ -130,13 +130,13 @@
                     <table class="trades-table">
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Symbol</th>
-                                <th>Type</th>
-                                <th>Entry</th>
-                                <th>Exit</th>
-                                <th>P&L</th>
-                                <th>AI Model</th>
+                                <th>Tarih/Saat</th>
+                                <th>Coin</th>
+                                <th>Yön</th>
+                                <th>Giriş</th>
+                                <th>Çıkış</th>
+                                <th>Kaldıraç</th>
+                                <th>Kar/Zarar</th>
                             </tr>
                         </thead>
                         <tbody id="trades-tbody">
@@ -177,10 +177,11 @@
                             <div class="form-group">
                                 <label>Leverage</label>
                                 <select id="order-leverage">
-                                    <option value="1">1x</option>
-                                    <option value="3">3x</option>
-                                    <option value="5">5x</option>
                                     <option value="10">10x</option>
+                                    <option value="15">15x</option>
+                                    <option value="20">20x</option>
+                                    <option value="25">25x</option>
+                                    <option value="30">30x</option>
                                 </select>
                             </div>
                             <button type="submit" class="btn btn-primary btn-block">Place Order</button>
