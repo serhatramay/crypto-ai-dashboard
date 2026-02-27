@@ -153,32 +153,66 @@ class PaperTradingState:
         self.ai_bot = AITradingBot(self)
         
     def update_prices(self):
+        """Çoklu API desteği - biri çalışmazsa diğeri devreye girer"""
+        
+        # API 1: CoinGecko
         try:
-            # CoinGecko API - daha yaygın erişim
             url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true'
             req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with request.urlopen(req, timeout=10) as response:
+            with request.urlopen(req, timeout=8) as response:
                 data = json.loads(response.read().decode())
                 with self.lock:
-                    self.prices["BTCUSDT"] = {
-                        "price": float(data['bitcoin']['usd']),
-                        "change": float(data['bitcoin'].get('usd_24h_change', 0))
-                    }
-                    self.prices["ETHUSDT"] = {
-                        "price": float(data['ethereum']['usd']),
-                        "change": float(data['ethereum'].get('usd_24h_change', 0))
-                    }
-                    self.prices["SOLUSDT"] = {
-                        "price": float(data['solana']['usd']),
-                        "change": float(data['solana'].get('usd_24h_change', 0))
-                    }
-                    self.prices["XRPUSDT"] = {
-                        "price": float(data['ripple']['usd']),
-                        "change": float(data['ripple'].get('usd_24h_change', 0))
-                    }
+                    self.prices["BTCUSDT"] = {"price": float(data['bitcoin']['usd']), "change": float(data['bitcoin'].get('usd_24h_change', 0))}
+                    self.prices["ETHUSDT"] = {"price": float(data['ethereum']['usd']), "change": float(data['ethereum'].get('usd_24h_change', 0))}
+                    self.prices["SOLUSDT"] = {"price": float(data['solana']['usd']), "change": float(data['solana'].get('usd_24h_change', 0))}
+                    self.prices["XRPUSDT"] = {"price": float(data['ripple']['usd']), "change": float(data['ripple'].get('usd_24h_change', 0))}
                     self.update_position_pnl()
+                    print("[Price] CoinGecko OK")
+                    return
         except Exception as e:
-            print(f"[Price Update] Error: {e}")
+            print(f"[Price] CoinGecko failed: {e}")
+        
+        # API 2: CoinCap
+        try:
+            symbols_map = {"bitcoin": "BTCUSDT", "ethereum": "ETHUSDT", "solana": "SOLUSDT", "xrp": "XRPUSDT"}
+            ids = "bitcoin,ethereum,solana,xrp"
+            url = f'https://api.coincap.io/v2/assets?ids={ids}'
+            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with request.urlopen(req, timeout=8) as response:
+                data = json.loads(response.read().decode())
+                with self.lock:
+                    for item in data['data']:
+                        symbol = symbols_map.get(item['id'])
+                        if symbol:
+                            self.prices[symbol] = {
+                                "price": float(item['priceUsd']),
+                                "change": float(item.get('changePercent24Hr', 0))
+                            }
+                    self.update_position_pnl()
+                    print("[Price] CoinCap OK")
+                    return
+        except Exception as e:
+            print(f"[Price] CoinCap failed: {e}")
+        
+        # API 3: CryptoCompare (ücretsiz, rate limit yüksek)
+        try:
+            url = 'https://min-api.cryptocompare.com/data/pricemultifull?fsyms=BTC,ETH,SOL,XRP&tsyms=USD'
+            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with request.urlopen(req, timeout=8) as response:
+                data = json.loads(response.read().decode())
+                raw = data['RAW']
+                with self.lock:
+                    self.prices["BTCUSDT"] = {"price": float(raw['BTC']['USD']['PRICE']), "change": float(raw['BTC']['USD'].get('CHANGEPCT24HOUR', 0))}
+                    self.prices["ETHUSDT"] = {"price": float(raw['ETH']['USD']['PRICE']), "change": float(raw['ETH']['USD'].get('CHANGEPCT24HOUR', 0))}
+                    self.prices["SOLUSDT"] = {"price": float(raw['SOL']['USD']['PRICE']), "change": float(raw['SOL']['USD'].get('CHANGEPCT24HOUR', 0))}
+                    self.prices["XRPUSDT"] = {"price": float(raw['XRP']['USD']['PRICE']), "change": float(raw['XRP']['USD'].get('CHANGEPCT24HOUR', 0))}
+                    self.update_position_pnl()
+                    print("[Price] CryptoCompare OK")
+                    return
+        except Exception as e:
+            print(f"[Price] CryptoCompare failed: {e}")
+        
+        print("[Price] All APIs failed, using cached prices")
     
     def update_position_pnl(self):
         for pos in self.positions:
