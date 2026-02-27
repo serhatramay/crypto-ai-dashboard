@@ -530,7 +530,16 @@ def main():
     print("[Server] Starting price updater...")
     updater_thread = threading.Thread(target=price_updater, daemon=True)
     updater_thread.start()
-    
+
+    # Bot'u otomatik başlat (10 saniye sonra, fiyatlar yüklensin)
+    def auto_start_bot():
+        time.sleep(10)
+        print("[Server] Auto-starting AI bot...")
+        state.ai_bot.start()
+
+    bot_starter = threading.Thread(target=auto_start_bot, daemon=True)
+    bot_starter.start()
+
     server = ThreadedHTTPServer((host, port), DashboardHandler)
     print(f"[Server] Dashboard running at http://{host}:{port}")
     
