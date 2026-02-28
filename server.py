@@ -745,80 +745,93 @@ class AITradingBot:
     }
 
     def fetch_crypto_news(self):
-        """CryptoPanic API'den kripto haber sentimenti çek"""
-        api_key = os.environ.get('CRYPTOPANIC_API_KEY', '')
-        if not api_key:
+        """Ücretsiz RSS feed'lerden kripto haber sentimenti çek (API key gerektirmez)"""
+        import xml.etree.ElementTree as ET
+        rss_feeds = [
+            'https://cryptopanic.com/news/rss/',
+            'https://cointelegraph.com/rss',
+        ]
+        all_titles = []
+        for feed_url in rss_feeds:
+            try:
+                req = request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with request.urlopen(req, timeout=10) as resp:
+                    xml_data = resp.read().decode()
+                    root = ET.fromstring(xml_data)
+                    for item in root.iter('item'):
+                        title = item.findtext('title', '')
+                        desc = item.findtext('description', '')
+                        if title:
+                            all_titles.append((title, desc or ''))
+            except Exception as e:
+                print(f"[AI Bot] RSS fetch failed ({feed_url}): {e}")
+                continue
+
+        if not all_titles:
             return
-        try:
-            url = f'https://cryptopanic.com/api/v1/posts/?auth_token={api_key}&public=true&currencies=BTC,ETH,SOL&kind=news'
-            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
-                results = data.get('results', [])[:20]  # Son 20 haber
 
-                if not results:
-                    return
+        headlines = []
+        news_bullish = 0
+        news_bearish = 0
+        geo_score = 0
+        geo_keywords = []
 
-                # Haber sentiment skoru (votes bazlı)
-                total_bullish = 0
-                total_bearish = 0
-                headlines = []
-                geo_score = 0
-                geo_keywords = []
+        for title, desc in all_titles[:30]:
+            text = (title + ' ' + desc).lower()
+            headlines.append(title[:80])
 
-                for post in results:
-                    votes = post.get('votes', {})
-                    bullish = votes.get('positive', 0) + votes.get('liked', 0)
-                    bearish = votes.get('negative', 0) + votes.get('disliked', 0)
-                    total_bullish += bullish
-                    total_bearish += bearish
-                    headlines.append(post.get('title', '')[:80])
+            # Haber sentiment (keyword tabanlı)
+            for kw in self.GEO_KEYWORDS["very_bullish"]:
+                if kw in text:
+                    news_bullish += 2
+            for kw in self.GEO_KEYWORDS["bullish"]:
+                if kw in text:
+                    news_bullish += 1
+            for kw in self.GEO_KEYWORDS["very_bearish"]:
+                if kw in text:
+                    news_bearish += 2
+            for kw in self.GEO_KEYWORDS["bearish"]:
+                if kw in text:
+                    news_bearish += 1
 
-                    # Jeopolitik keyword taraması
-                    text = (post.get('title', '') + ' ' + post.get('description', '')).lower() if post.get('description') else post.get('title', '').lower()
-                    for kw in self.GEO_KEYWORDS["very_bearish"]:
-                        if kw in text:
-                            geo_score -= 2
-                            if kw not in geo_keywords:
-                                geo_keywords.append(kw)
-                    for kw in self.GEO_KEYWORDS["bearish"]:
-                        if kw in text:
-                            geo_score -= 1
-                            if kw not in geo_keywords:
-                                geo_keywords.append(kw)
-                    for kw in self.GEO_KEYWORDS["bullish"]:
-                        if kw in text:
-                            geo_score += 1
-                            if kw not in geo_keywords:
-                                geo_keywords.append(kw)
-                    for kw in self.GEO_KEYWORDS["very_bullish"]:
-                        if kw in text:
-                            geo_score += 2
-                            if kw not in geo_keywords:
-                                geo_keywords.append(kw)
+            # Jeopolitik keyword taraması
+            for kw in self.GEO_KEYWORDS["very_bearish"]:
+                if kw in text and kw not in geo_keywords:
+                    geo_score -= 2
+                    geo_keywords.append(kw)
+            for kw in self.GEO_KEYWORDS["bearish"]:
+                if kw in text and kw not in geo_keywords:
+                    geo_score -= 1
+                    geo_keywords.append(kw)
+            for kw in self.GEO_KEYWORDS["bullish"]:
+                if kw in text and kw not in geo_keywords:
+                    geo_score += 1
+                    geo_keywords.append(kw)
+            for kw in self.GEO_KEYWORDS["very_bullish"]:
+                if kw in text and kw not in geo_keywords:
+                    geo_score += 2
+                    geo_keywords.append(kw)
 
-                # News sentiment: -1 ile +1 arası
-                total_votes = total_bullish + total_bearish
-                news_score = (total_bullish - total_bearish) / total_votes if total_votes > 0 else 0
+        # News sentiment: -1 ile +1 arası
+        total = news_bullish + news_bearish
+        news_score = (news_bullish - news_bearish) / total if total > 0 else 0
 
-                self.news_sentiment = {
-                    "score": round(news_score, 2),
-                    "count": len(results),
-                    "headlines": headlines[:5]
-                }
+        self.news_sentiment = {
+            "score": round(news_score, 2),
+            "count": len(all_titles[:30]),
+            "headlines": headlines[:5]
+        }
 
-                # Geo sentiment: normalize et (-1 ile +1 arası)
-                max_geo = len(results) * 2  # Maksimum olası skor
-                geo_normalized = max(-1, min(1, geo_score / max_geo)) if max_geo > 0 else 0
-                self.geo_sentiment = {
-                    "score": round(geo_normalized, 2),
-                    "keywords_found": geo_keywords[:10]
-                }
+        # Geo sentiment: -1 ile +1 arası
+        max_geo = len(all_titles[:30]) * 2
+        geo_normalized = max(-1, min(1, geo_score / max_geo)) if max_geo > 0 else 0
+        self.geo_sentiment = {
+            "score": round(geo_normalized, 2),
+            "keywords_found": geo_keywords[:10]
+        }
 
-                print(f"[AI Bot] News Sentiment: {self.news_sentiment['score']} ({self.news_sentiment['count']} haber)")
-                print(f"[AI Bot] Geo Sentiment: {self.geo_sentiment['score']} (keywords: {', '.join(geo_keywords[:5])})")
-        except Exception as e:
-            print(f"[AI Bot] CryptoPanic fetch failed: {e}")
+        print(f"[AI Bot] News Sentiment: {self.news_sentiment['score']} ({self.news_sentiment['count']} haber)")
+        print(f"[AI Bot] Geo Sentiment: {self.geo_sentiment['score']} (keywords: {', '.join(geo_keywords[:5])})")
 
     def get_prices(self, symbol):
         """Saatlik + kısa vadeli fiyatları birleştir"""
