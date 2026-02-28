@@ -49,31 +49,63 @@ def init_db():
             id SERIAL PRIMARY KEY,
             time TEXT, date TEXT, symbol TEXT, side TEXT,
             entry DOUBLE PRECISION, exit_price DOUBLE PRECISION,
-            pnl DOUBLE PRECISION, leverage INTEGER DEFAULT 1, model TEXT
+            pnl DOUBLE PRECISION, leverage INTEGER DEFAULT 1, model TEXT,
+            close_reason TEXT
         )""")
         cur.execute("""CREATE TABLE IF NOT EXISTS positions (
             id INTEGER PRIMARY KEY,
             symbol TEXT, side TEXT, entry DOUBLE PRECISION, size DOUBLE PRECISION,
-            leverage INTEGER, margin DOUBLE PRECISION, open_time TEXT
+            leverage INTEGER, margin DOUBLE PRECISION, open_time TEXT,
+            dynamic_tp_pct DOUBLE PRECISION DEFAULT 50,
+            dynamic_sl_pct DOUBLE PRECISION DEFAULT 10
         )""")
         cur.execute("""CREATE TABLE IF NOT EXISTS state (
             key TEXT PRIMARY KEY, value DOUBLE PRECISION
         )""")
+        # Migration: add new columns if missing
+        try:
+            cur.execute("ALTER TABLE trades ADD COLUMN close_reason TEXT")
+        except Exception:
+            pass  # column already exists
+        try:
+            cur.execute("ALTER TABLE positions ADD COLUMN dynamic_tp_pct DOUBLE PRECISION DEFAULT 50")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE positions ADD COLUMN dynamic_sl_pct DOUBLE PRECISION DEFAULT 10")
+        except Exception:
+            pass
         print("[DB] PostgreSQL (Neon) initialized")
     else:
         cur.execute("""CREATE TABLE IF NOT EXISTS trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             time TEXT, date TEXT, symbol TEXT, side TEXT,
-            entry REAL, exit_price REAL, pnl REAL, leverage INTEGER DEFAULT 1, model TEXT
+            entry REAL, exit_price REAL, pnl REAL, leverage INTEGER DEFAULT 1, model TEXT,
+            close_reason TEXT
         )""")
         cur.execute("""CREATE TABLE IF NOT EXISTS positions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT, side TEXT, entry REAL, size REAL,
-            leverage INTEGER, margin REAL, open_time TEXT
+            leverage INTEGER, margin REAL, open_time TEXT,
+            dynamic_tp_pct REAL DEFAULT 50,
+            dynamic_sl_pct REAL DEFAULT 10
         )""")
         cur.execute("""CREATE TABLE IF NOT EXISTS state (
             key TEXT PRIMARY KEY, value REAL
         )""")
+        # Migration: add new columns if missing
+        try:
+            cur.execute("ALTER TABLE trades ADD COLUMN close_reason TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE positions ADD COLUMN dynamic_tp_pct REAL DEFAULT 50")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE positions ADD COLUMN dynamic_sl_pct REAL DEFAULT 10")
+        except Exception:
+            pass
         conn.commit()
         print("[DB] SQLite initialized (local mode)")
     cur.close()
@@ -85,17 +117,17 @@ def db_save_trade(trade):
         cur = conn.cursor()
         if DATABASE_URL:
             cur.execute(
-                "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model, close_reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
                  trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
-                 trade.get('leverage', 1), trade['model'])
+                 trade.get('leverage', 1), trade['model'], trade.get('close_reason', ''))
             )
         else:
             cur.execute(
-                "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model) VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO trades (time, date, symbol, side, entry, exit_price, pnl, leverage, model, close_reason) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (trade['time'], trade.get('date', datetime.now(TR_TZ).strftime("%Y-%m-%d")),
                  trade['symbol'], trade['side'], trade['entry'], trade['exit'], trade['pnl'],
-                 trade.get('leverage', 1), trade['model'])
+                 trade.get('leverage', 1), trade['model'], trade.get('close_reason', ''))
             )
             conn.commit()
         cur.close()
@@ -109,13 +141,13 @@ def db_save_position(pos):
         cur = conn.cursor()
         if DATABASE_URL:
             cur.execute(
-                "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
-                (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
+                "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time, dynamic_tp_pct, dynamic_sl_pct) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
+                (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'], pos.get('dynamic_tp_pct', 50), pos.get('dynamic_sl_pct', 10))
             )
         else:
             cur.execute(
-                "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time) VALUES (?,?,?,?,?,?,?,?)",
-                (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'])
+                "INSERT INTO positions (id, symbol, side, entry, size, leverage, margin, open_time, dynamic_tp_pct, dynamic_sl_pct) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (pos['id'], pos['symbol'], pos['side'], pos['entry'], pos['size'], pos['leverage'], pos['margin'], pos['open_time'], pos.get('dynamic_tp_pct', 50), pos.get('dynamic_sl_pct', 10))
             )
             conn.commit()
         cur.close()
@@ -174,12 +206,13 @@ def db_load_all():
 
     trades = []
     if DATABASE_URL:
-        cur.execute("SELECT time, date, symbol, side, entry, exit_price, pnl, leverage, model FROM trades ORDER BY id DESC")
+        cur.execute("SELECT time, date, symbol, side, entry, exit_price, pnl, leverage, model, close_reason FROM trades ORDER BY id DESC")
         for row in cur.fetchall():
             trades.append({
                 "time": row[0], "date": row[1], "symbol": row[2],
                 "side": row[3], "entry": row[4], "exit": row[5],
-                "pnl": row[6], "leverage": row[7] or 1, "model": row[8]
+                "pnl": row[6], "leverage": row[7] or 1, "model": row[8],
+                "close_reason": row[9] or ""
             })
     else:
         for row in conn.execute("SELECT * FROM trades ORDER BY id DESC"):
@@ -187,18 +220,20 @@ def db_load_all():
                 "time": row['time'], "date": row['date'], "symbol": row['symbol'],
                 "side": row['side'], "entry": row['entry'], "exit": row['exit_price'],
                 "pnl": row['pnl'], "leverage": row['leverage'] if 'leverage' in row.keys() else 1,
-                "model": row['model']
+                "model": row['model'],
+                "close_reason": row['close_reason'] if 'close_reason' in row.keys() else ""
             })
 
     positions = []
     if DATABASE_URL:
-        cur.execute("SELECT id, symbol, side, entry, size, leverage, margin, open_time FROM positions")
+        cur.execute("SELECT id, symbol, side, entry, size, leverage, margin, open_time, dynamic_tp_pct, dynamic_sl_pct FROM positions")
         for row in cur.fetchall():
             positions.append({
                 "id": row[0], "symbol": row[1], "side": row[2],
                 "entry": row[3], "current_price": row[3], "size": row[4],
                 "leverage": row[5], "margin": row[6], "pnl": 0.0,
-                "open_time": row[7]
+                "open_time": row[7],
+                "dynamic_tp_pct": row[8] or 50, "dynamic_sl_pct": row[9] or 10
             })
     else:
         for row in conn.execute("SELECT * FROM positions"):
@@ -206,7 +241,9 @@ def db_load_all():
                 "id": row['id'], "symbol": row['symbol'], "side": row['side'],
                 "entry": row['entry'], "current_price": row['entry'], "size": row['size'],
                 "leverage": row['leverage'], "margin": row['margin'], "pnl": 0.0,
-                "open_time": row['open_time']
+                "open_time": row['open_time'],
+                "dynamic_tp_pct": row['dynamic_tp_pct'] if 'dynamic_tp_pct' in row.keys() else 50,
+                "dynamic_sl_pct": row['dynamic_sl_pct'] if 'dynamic_sl_pct' in row.keys() else 10
             })
 
     balance = None
@@ -900,12 +937,18 @@ class AITradingBot:
                 score -= 25
                 reasons.append(f"RSI:{rsi_simple:.0f}")
 
-            # F&G aşırılıklarda sinyali güçlendirir
-            if fg < 20 and score > 0:
-                score += 15
+            # F&G trend takipçi - korku=SHORT güçlen, açgözlülük=LONG güçlen
+            if fg < 20:
+                score -= 30  # Aşırı korku = piyasa çöküyor
                 reasons.append(f"F&G:{fg}")
-            elif fg > 80 and score < 0:
+            elif fg < 35:
                 score -= 15
+                reasons.append(f"F&G:{fg}")
+            elif fg > 80:
+                score += 30  # Aşırı açgözlülük = coşku
+                reasons.append(f"F&G:{fg}")
+            elif fg > 65:
+                score += 15
                 reasons.append(f"F&G:{fg}")
 
             if momentum != 0:
@@ -1050,17 +1093,17 @@ class AITradingBot:
             vol_multiplier = 0.7
         scores['volume'] = 0  # Hacim tek başına sinyal vermez, çarpan olarak kullanılır
 
-        # 9. FVG - Fair Value Gap (ağırlık: %14)
-        scores['fvg'] = fvg_score
+        # 9. FVG - Fair Value Gap (ICT - düşük ağırlık, sınırlı veriyle gürültü yapıyor)
+        scores['fvg'] = max(-50, min(50, fvg_score))  # Cap at ±50
 
         # 10. Divergence - RSI Uyumsuzluğu (ağırlık: %10)
         scores['divergence'] = div_score
 
-        # 11. Order Block - Kurumsal Bölge (ağırlık: %10)
-        scores['order_block'] = ob_score
+        # 11. Order Block - Kurumsal Bölge (ICT - düşük ağırlık)
+        scores['order_block'] = max(-50, min(50, ob_score))
 
-        # 12. Liquidity Sweep - Likidite Avı (ağırlık: %8)
-        scores['liquidity'] = liq_score
+        # 12. Liquidity Sweep - Likidite Avı (ICT - düşük ağırlık)
+        scores['liquidity'] = max(-50, min(50, liq_score))
 
         # 13. 24h Momentum - Günlük fiyat değişimi (ağırlık: %10)
         if change_24h <= -5:
@@ -1087,13 +1130,16 @@ class AITradingBot:
         scores['geopolitical'] = round(geo_score * 90)  # -90 ile +90 arası
 
         # === AĞIRLIKLI TOPLAM SKOR ===
+        # ICT göstergeleri (FVG, OB, LIQ) sınırlı veriyle gürültü yapıyor
+        # Güvenilir göstergelere ağırlık ver: momentum, F&G, MACD, EMA, haber
         weights = {
-            'rsi': 0.06, 'macd': 0.06, 'bollinger': 0.05,
-            'ema_cross': 0.08, 'trend': 0.08, 'sr': 0.05,
-            'fear_greed': 0.06, 'volume': 0.03, 'fvg': 0.05,
-            'divergence': 0.05, 'order_block': 0.05, 'liquidity': 0.05,
-            'momentum_24h': 0.12,
-            'news_sentiment': 0.10, 'geopolitical': 0.11
+            'momentum_24h': 0.18,  # En güvenilir - net trend yönü
+            'fear_greed': 0.12,    # Piyasa genel duygusu
+            'news_sentiment': 0.12, 'geopolitical': 0.12,  # Haber etkisi
+            'macd': 0.10, 'ema_cross': 0.10, 'trend': 0.08,  # Teknik trend
+            'rsi': 0.06, 'bollinger': 0.05, 'sr': 0.03,  # Destek/direnç
+            'fvg': 0.02, 'order_block': 0.01, 'liquidity': 0.01,  # ICT - minimal
+            'divergence': 0.03, 'volume': 0.0  # Volume çarpan olarak kullanılıyor
         }
         total_score = sum(scores.get(k, 0) * w for k, w in weights.items())
         total_score *= vol_multiplier  # Hacim çarpanı uygula
@@ -1310,9 +1356,9 @@ class AITradingBot:
         if price_data and self.data_ready:
             signal, _, _, indicators = self.analyze_market(symbol, price_data)
             score = indicators.get('total_score', 0)
-            if position['side'] == 'buy' and score < -70:
+            if position['side'] == 'buy' and score < -85:
                 return True, f"Ters sinyal (skor:{score:.0f})"
-            elif position['side'] == 'sell' and score > 70:
+            elif position['side'] == 'sell' and score > 85:
                 return True, f"Ters sinyal (skor:{score:.0f})"
 
         return False, None
@@ -1396,7 +1442,7 @@ class AITradingBot:
                         positions_to_close.append((pos['id'], reason))
 
                 for pos_id, reason in positions_to_close:
-                    result = self.state.close_position(pos_id)
+                    result = self.state.close_position(pos_id, close_reason=reason)
                     if result.get('status') == 'ok':
                         trade = result['trade']
                         self.cooldown_until[trade['symbol']] = time.time() + AI_CONFIG["cooldown"]
@@ -1696,22 +1742,22 @@ class PaperTradingState:
                 "balance": self.balance
             }
     
-    def close_position(self, position_id):
+    def close_position(self, position_id, close_reason="Manual"):
         with self.lock:
             pos = None
             for p in self.positions:
                 if p['id'] == position_id:
                     pos = p
                     break
-            
+
             if not pos:
                 return {"error": "Position not found"}
-            
+
             self.update_position_pnl()
             final_pnl = pos['pnl']
-            
+
             self.balance += pos['margin'] + final_pnl
-            
+
             trade = {
                 "time": datetime.now(TR_TZ).strftime("%H:%M:%S"),
                 "date": datetime.now(TR_TZ).strftime("%Y-%m-%d"),
@@ -1721,7 +1767,8 @@ class PaperTradingState:
                 "exit": pos['current_price'],
                 "leverage": pos['leverage'],
                 "pnl": final_pnl,
-                "model": self.selected_model
+                "model": self.selected_model,
+                "close_reason": close_reason
             }
             self.trades.insert(0, trade)
             self.positions.remove(pos)
@@ -1765,6 +1812,7 @@ class PaperTradingState:
                 "win_rate": round(win_rate, 1),
                 "total_trades": total_trades,
                 "ai_status": self.ai_status,
+                "bot_running": self.ai_bot.running,
                 "selected_model": self.selected_model,
                 "ai_analysis": self.ai_bot.last_analysis,
                 "fear_greed": self.ai_bot.fear_greed,

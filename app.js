@@ -201,10 +201,11 @@ function renderTrades() {
                 <td>$${t.exit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                 <td>${t.leverage || '-'}x</td>
                 <td class="trade-pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl >= 0 ? '+' : '-'}$${Math.abs(t.pnl).toFixed(2)} (${leveragePnlPct}%)</td>
+                <td style="font-size:12px; color: var(--text-secondary)">${t.close_reason || '-'}</td>
             </tr>`;
         }).join('');
     } else if (elements.tradesTbody) {
-        elements.tradesTbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 20px;">Henüz trade yok - Bot çalışınca burada görünecek</td></tr>';
+        elements.tradesTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--text-muted); padding: 20px;">Henüz trade yok - Bot çalışınca burada görünecek</td></tr>';
     }
 
     if (elements.winRate) {
