@@ -1326,9 +1326,14 @@ class AITradingBot:
 
                         if self.should_open_position(symbol, signal):
                             atr_val = indicators.get('atr', 0)
+                            # Bakiyeyi açık pozisyon sayısına göre böl
+                            open_count = len(self.state.positions)
+                            remaining_slots = AI_CONFIG["max_positions"] - open_count
+                            trade_amount = self.state.balance / remaining_slots if remaining_slots > 0 else 0
+                            trade_amount = round(trade_amount, 2)
                             result = self.state.open_position(
                                 symbol=symbol, side=signal,
-                                amount=AI_CONFIG["trade_amount"], leverage=leverage,
+                                amount=trade_amount, leverage=leverage,
                                 atr=atr_val
                             )
                             if result.get('status') == 'ok':
