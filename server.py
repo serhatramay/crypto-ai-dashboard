@@ -251,10 +251,13 @@ def send_telegram(message):
 # AI Trading Configuration
 AI_CONFIG = {
     "max_positions": 5,
+    "max_same_direction": 2,  # Aynı yönde max 2 pozisyon (LONG+LONG veya SHORT+SHORT)
     "trade_amount": 500,
     "check_interval": 300,  # 5 dakika
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
+    "daily_loss_limit_pct": 5,  # Günlük max kayıp: bakiyenin %5'i
+    "min_volume_ratio": 0.8,  # Min hacim oranı (ortalamanın 0.8 katı altında işlem açma)
 }
 
 # ============================================================
@@ -360,6 +363,19 @@ class TechnicalAnalyzer:
         return sorted(supports)[-3:] if supports else [], sorted(resistances)[:3] if resistances else []
 
     @staticmethod
+    def atr(prices, period=14):
+        """ATR - Average True Range (volatilite ölçümü)"""
+        if len(prices) < period + 1:
+            return None
+        true_ranges = []
+        for i in range(1, len(prices)):
+            high_low = abs(prices[i] - prices[i-1])  # Basitleştirilmiş (close-to-close)
+            true_ranges.append(high_low)
+        if len(true_ranges) < period:
+            return None
+        return sum(true_ranges[-period:]) / period
+
+    @staticmethod
     def volume_signal(volumes, period=20):
         """Hacim analizi"""
         if len(volumes) < period or not volumes[-1]:
@@ -399,6 +415,9 @@ class AITradingBot:
         self.cooldown_until = {s: 0 for s in self.SYMBOLS}
         # Trailing stop: pozisyon ID → en yüksek kâr %
         self.peak_pnl_pct = {}
+        # Günlük kayıp takibi
+        self.daily_loss = 0.0
+        self.daily_loss_date = datetime.now(TR_TZ).strftime("%Y-%m-%d")
 
     def feed_price(self, symbol, price):
         """Price updater'dan fiyat geçmişini besle"""
@@ -555,6 +574,7 @@ class AITradingBot:
         macd_line, macd_signal, macd_hist = TechnicalAnalyzer.macd(prices)
         bb_upper, bb_mid, bb_lower = TechnicalAnalyzer.bollinger_bands(prices)
         ema_cross = TechnicalAnalyzer.ema_crossover(prices, 9, 21)
+        atr_value = TechnicalAnalyzer.atr(prices, 14)
         ema9 = TechnicalAnalyzer.ema_series(prices, 9)
         ema21 = TechnicalAnalyzer.ema_series(prices, 21)
         ema50 = TechnicalAnalyzer.ema_series(prices, 50)
@@ -718,6 +738,7 @@ class AITradingBot:
             "resistance": [round(r, 2) for r in resistances],
             "volume": {"signal": vol_signal, "ratio": round(vol_ratio, 2)},
             "fear_greed": self.fear_greed,
+            "atr": round(atr_value, 4) if atr_value else 0,
             "change_24h": round(change_24h, 2),
             "scores": {k: round(v, 1) for k, v in scores.items()},
             "total_score": round(total_score, 1)
@@ -743,6 +764,8 @@ class AITradingBot:
         return signal, reason_text, leverage, indicators
 
     def should_open_position(self, symbol, signal):
+        if signal not in ["buy", "sell"]:
+            return False
         if len(self.state.positions) >= AI_CONFIG["max_positions"]:
             return False
         for pos in self.state.positions:
@@ -751,19 +774,42 @@ class AITradingBot:
         # Soğuma süresi kontrolü (15 dakika)
         if time.time() < self.cooldown_until.get(symbol, 0):
             return False
-        return signal in ["buy", "sell"]
+        # Aynı yönde max pozisyon kontrolü
+        same_dir = sum(1 for p in self.state.positions if p['side'] == signal)
+        if same_dir >= AI_CONFIG["max_same_direction"]:
+            return False
+        # Günlük kayıp limiti kontrolü
+        today = datetime.now(TR_TZ).strftime("%Y-%m-%d")
+        if today != self.daily_loss_date:
+            self.daily_loss = 0.0
+            self.daily_loss_date = today
+        daily_limit = self.state.initial_balance * AI_CONFIG["daily_loss_limit_pct"] / 100
+        if self.daily_loss >= daily_limit:
+            return False
+        # Hacim kontrolü - düşük hacimde işlem açma
+        volumes = self.candle_volumes.get(symbol, [])
+        if len(volumes) >= 20:
+            avg_vol = sum(volumes[-20:]) / 20
+            current_vol = volumes[-1] if volumes else 0
+            if avg_vol > 0 and current_vol / avg_vol < AI_CONFIG["min_volume_ratio"]:
+                return False
+        return True
 
     def should_close_position(self, position):
-        """Akıllı çıkış - Trailing SL + TP/SL + acil SL + ters sinyal"""
+        """Akıllı çıkış - Trailing SL + dinamik TP/SL + acil SL + ters sinyal"""
         pnl_pct = (position['pnl'] / position['margin']) * 100
         pos_id = position['id']
+
+        # Dinamik TP/SL (ATR bazlı, yoksa sabit)
+        sl_pct = position.get('dynamic_sl_pct', AI_CONFIG["stop_loss_pct"])
+        tp_pct = position.get('dynamic_tp_pct', AI_CONFIG["take_profit_pct"])
 
         # Acil stop loss - Render uyku vb. durumlar için güvenlik (kayıp %20'yi geçerse hemen kapat)
         if pnl_pct <= -20:
             return True, f"Acil Stop Loss (-%{abs(pnl_pct):.1f})"
 
-        # Normal stop loss
-        if pnl_pct <= -AI_CONFIG["stop_loss_pct"]:
+        # Normal stop loss (dinamik)
+        if pnl_pct <= -sl_pct:
             return True, f"Stop Loss (-%{abs(pnl_pct):.1f})"
 
         # Trailing Stop mekanizması
@@ -782,8 +828,8 @@ class AITradingBot:
             if pnl_pct <= 0:
                 return True, f"Breakeven Stop (+%{pnl_pct:.1f}, zirve: +%{peak:.1f})"
 
-        # Take profit
-        if pnl_pct >= AI_CONFIG["take_profit_pct"]:
+        # Take profit (dinamik)
+        if pnl_pct >= tp_pct:
             return True, f"Take Profit (+%{pnl_pct:.1f})"
 
         # Ters sinyal kontrolü - pozisyon yönüne ters güçlü sinyal varsa kapat
@@ -861,6 +907,9 @@ class AITradingBot:
                         self.cooldown_until[trade['symbol']] = time.time() + 900
                         # Trailing stop verisini temizle
                         self.peak_pnl_pct.pop(pos_id, None)
+                        # Günlük kayıp takibi
+                        if trade['pnl'] < 0:
+                            self.daily_loss += abs(trade['pnl'])
                         print(f"[AI Bot] CLOSED: {trade['symbol']} | PnL: ${trade['pnl']:.2f} | {reason}")
 
                         # Telegram bildirim
@@ -901,9 +950,11 @@ class AITradingBot:
                     }
 
                     if self.should_open_position(symbol, signal):
+                        atr_val = indicators.get('atr', 0)
                         result = self.state.open_position(
                             symbol=symbol, side=signal,
-                            amount=AI_CONFIG["trade_amount"], leverage=leverage
+                            amount=AI_CONFIG["trade_amount"], leverage=leverage,
+                            atr=atr_val
                         )
                         if result.get('status') == 'ok':
                             pos = result['position']
@@ -1070,13 +1121,14 @@ class PaperTradingState:
             pos['pnl'] = price_diff * pos['size']
             pos['current_price'] = current_price
 
-            # Hedef fiyatları hesapla (take profit / stop loss)
+            # Hedef fiyatları hesapla (dinamik TP/SL)
             entry = pos['entry']
             size = pos['size']
-            leverage = pos['leverage']
             margin = pos['margin']
-            tp_delta = (margin * AI_CONFIG["take_profit_pct"] / 100) / size
-            sl_delta = (margin * AI_CONFIG["stop_loss_pct"] / 100) / size
+            tp_pct = pos.get('dynamic_tp_pct', AI_CONFIG["take_profit_pct"])
+            sl_pct = pos.get('dynamic_sl_pct', AI_CONFIG["stop_loss_pct"])
+            tp_delta = (margin * tp_pct / 100) / size
+            sl_delta = (margin * sl_pct / 100) / size
 
             if pos['side'] == 'buy':
                 pos['tp_price'] = entry + tp_delta
@@ -1085,22 +1137,32 @@ class PaperTradingState:
                 pos['tp_price'] = entry - tp_delta
                 pos['sl_price'] = entry + sl_delta
     
-    def open_position(self, symbol, side, amount, leverage=1):
+    def open_position(self, symbol, side, amount, leverage=1, atr=0):
         with self.lock:
             price = self.prices.get(symbol, {}).get('price', 0)
             if price == 0:
                 return {"error": "Price not available"}
-            
+
             size = (amount * leverage) / price
-            
+
             if amount > self.balance:
                 return {"error": "Insufficient balance"}
-            
+
             self.balance -= amount
-            
+
             # Benzersiz ID için DB'deki max + mevcut pozisyonlardan büyük olan
             max_id = max([p['id'] for p in self.positions], default=0)
             new_id = max_id + 1
+
+            # ATR tabanlı dinamik TP/SL (coin volatilitesine göre)
+            if atr and atr > 0 and price > 0:
+                atr_pct = (atr / price) * 100  # ATR'nin fiyata oranı (%)
+                # TP: 2x ATR, SL: 1x ATR (2:1 risk/reward)
+                dynamic_tp_pct = max(3, min(15, atr_pct * 2 * leverage))
+                dynamic_sl_pct = max(2, min(7, atr_pct * 1 * leverage))
+            else:
+                dynamic_tp_pct = AI_CONFIG["take_profit_pct"]
+                dynamic_sl_pct = AI_CONFIG["stop_loss_pct"]
 
             position = {
                 "id": new_id,
@@ -1112,7 +1174,9 @@ class PaperTradingState:
                 "leverage": leverage,
                 "margin": amount,
                 "pnl": 0.0,
-                "open_time": datetime.now(TR_TZ).strftime("%H:%M:%S")
+                "open_time": datetime.now(TR_TZ).strftime("%H:%M:%S"),
+                "dynamic_tp_pct": round(dynamic_tp_pct, 1),
+                "dynamic_sl_pct": round(dynamic_sl_pct, 1),
             }
 
             self.positions.append(position)
