@@ -216,21 +216,21 @@ function renderTrades() {
 }
 
 function renderPrices() {
-    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT', 'MATICUSDT'];
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT', 'POLUSDT'];
     const icons = {
         'BTCUSDT': '₿', 'ETHUSDT': 'Ξ', 'SOLUSDT': '◎', 'XRPUSDT': '✕',
         'DOGEUSDT': 'Ð', 'ADAUSDT': '₳', 'AVAXUSDT': 'A', 'LINKUSDT': '⬡',
-        'DOTUSDT': '●', 'MATICUSDT': '⬡'
+        'DOTUSDT': '●', 'POLUSDT': '⬡'
     };
     const names = {
         'BTCUSDT': 'Bitcoin', 'ETHUSDT': 'Ethereum', 'SOLUSDT': 'Solana', 'XRPUSDT': 'XRP',
         'DOGEUSDT': 'Dogecoin', 'ADAUSDT': 'Cardano', 'AVAXUSDT': 'Avalanche', 'LINKUSDT': 'Chainlink',
-        'DOTUSDT': 'Polkadot', 'MATICUSDT': 'Polygon'
+        'DOTUSDT': 'Polkadot', 'POLUSDT': 'Polygon (POL)'
     };
     const colors = {
         'BTCUSDT': '#f7931a', 'ETHUSDT': '#627eea', 'SOLUSDT': '#9945ff', 'XRPUSDT': '#00aae4',
         'DOGEUSDT': '#c2a633', 'ADAUSDT': '#0033ad', 'AVAXUSDT': '#e84142', 'LINKUSDT': '#2a5ada',
-        'DOTUSDT': '#e6007a', 'MATICUSDT': '#8247e5'
+        'DOTUSDT': '#e6007a', 'POLUSDT': '#8247e5'
     };
 
     let html = '';
