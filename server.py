@@ -250,9 +250,9 @@ def send_telegram(message):
 
 # AI Trading Configuration
 AI_CONFIG = {
-    "max_positions": 10,
-    "max_same_direction": 5,  # Aynı yönde max 5 pozisyon
-    "trade_amount": 300,
+    "max_positions": 3,
+    "max_same_direction": 3,  # 3 coin, 3 pozisyon
+    "trade_amount": 3000,
     "check_interval": 60,  # 60 saniye (analiz aralığı)
     "stop_loss_pct": 5,
     "take_profit_pct": 25,
@@ -629,9 +629,9 @@ class TechnicalAnalyzer:
 
 class AITradingBot:
     """Profesyonel seviye AI trading bot - çoklu gösterge analizi"""
-    SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "POLUSDT"]
-    SYMBOL_MAP = {"BTCUSDT": "BTC", "ETHUSDT": "ETH", "SOLUSDT": "SOL", "XRPUSDT": "XRP", "DOGEUSDT": "DOGE", "ADAUSDT": "ADA", "AVAXUSDT": "AVAX", "LINKUSDT": "LINK", "DOTUSDT": "DOT", "POLUSDT": "POL"}
-    COINGECKO_IDS = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "XRP": "ripple", "DOGE": "dogecoin", "ADA": "cardano", "AVAX": "avalanche-2", "LINK": "chainlink", "DOT": "polkadot", "POL": "polygon-ecosystem-token"}
+    SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    SYMBOL_MAP = {"BTCUSDT": "BTC", "ETHUSDT": "ETH", "SOLUSDT": "SOL"}
+    COINGECKO_IDS = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
 
     def __init__(self, state):
         self.state = state
