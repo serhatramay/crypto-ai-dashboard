@@ -960,12 +960,29 @@ class AITradingBot:
         # 12. Liquidity Sweep - Likidite Avı (ağırlık: %8)
         scores['liquidity'] = liq_score
 
+        # 13. 24h Momentum - Günlük fiyat değişimi (ağırlık: %10)
+        if change_24h <= -5:
+            scores['momentum_24h'] = -80  # Sert düşüş = güçlü SHORT
+        elif change_24h <= -3:
+            scores['momentum_24h'] = -50
+        elif change_24h <= -1:
+            scores['momentum_24h'] = -20
+        elif change_24h >= 5:
+            scores['momentum_24h'] = 80  # Sert yükseliş = güçlü LONG
+        elif change_24h >= 3:
+            scores['momentum_24h'] = 50
+        elif change_24h >= 1:
+            scores['momentum_24h'] = 20
+        else:
+            scores['momentum_24h'] = 0
+
         # === AĞIRLIKLI TOPLAM SKOR ===
         weights = {
-            'rsi': 0.10, 'macd': 0.10, 'bollinger': 0.08,
-            'ema_cross': 0.10, 'trend': 0.10, 'sr': 0.08,
-            'fear_greed': 0.08, 'volume': 0.04, 'fvg': 0.08,
-            'divergence': 0.08, 'order_block': 0.08, 'liquidity': 0.08
+            'rsi': 0.08, 'macd': 0.08, 'bollinger': 0.06,
+            'ema_cross': 0.10, 'trend': 0.10, 'sr': 0.06,
+            'fear_greed': 0.08, 'volume': 0.04, 'fvg': 0.06,
+            'divergence': 0.06, 'order_block': 0.06, 'liquidity': 0.06,
+            'momentum_24h': 0.16
         }
         total_score = sum(scores.get(k, 0) * w for k, w in weights.items())
         total_score *= vol_multiplier  # Hacim çarpanı uygula
@@ -1013,9 +1030,9 @@ class AITradingBot:
 
         # === KARAR ===
         min_agreement = 3  # En az 3 gösterge uyumu
-        if total_score > 25 and bullish_count >= min_agreement and not trend_conflict:
+        if total_score > 20 and bullish_count >= min_agreement and not trend_conflict:
             signal = "buy"
-        elif total_score < -25 and bearish_count >= min_agreement and not trend_conflict:
+        elif total_score < -20 and bearish_count >= min_agreement and not trend_conflict:
             signal = "sell"
         else:
             signal = "hold"
