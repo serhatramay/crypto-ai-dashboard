@@ -252,7 +252,7 @@ def send_telegram(message):
 AI_CONFIG = {
     "max_positions": 3,
     "max_same_direction": 3,  # 3 coin, 3 pozisyon
-    "trade_amount": 3000,
+    "trade_amount": 30,
     "check_interval": 60,  # 60 saniye (analiz aralığı)
     "stop_loss_pct": 5,
     "take_profit_pct": 25,
@@ -1381,7 +1381,7 @@ class AITradingBot:
 
 class PaperTradingState:
     def __init__(self):
-        self.initial_balance = 10000.0
+        self.initial_balance = 100.0
         self.prices = {
             "BTCUSDT": {"price": 84230.50, "change": 2.34},
             "ETHUSDT": {"price": 2456.80, "change": -1.23},

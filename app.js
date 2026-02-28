@@ -125,10 +125,12 @@ function renderPositions() {
                 const tpPrice = p.tp_price || 0;
                 const slPrice = p.sl_price || 0;
                 const fmt = (v) => v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                const posSize = p.margin * p.leverage;
                 return `
                 <tr>
                     <td>${p.symbol.replace('USDT', '')}</td>
                     <td><span class="trade-type ${p.side === 'buy' ? 'long' : 'short'}">${p.side === 'buy' ? 'LONG' : 'SHORT'}</span></td>
+                    <td>$${fmt(p.margin)} <span style="font-size:11px;color:var(--text-muted)">(${p.leverage}x=$${fmt(posSize)})</span></td>
                     <td>$${fmt(p.entry)}</td>
                     <td>$${fmt(currentPrice)}</td>
                     <td style="color: var(--accent-success)">$${fmt(tpPrice)}</td>
@@ -139,7 +141,7 @@ function renderPositions() {
                 </tr>`;
             }).join('');
         } else {
-            dashboardTbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color: var(--text-muted); padding: 20px;">Aktif pozisyon yok</td></tr>';
+            dashboardTbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color: var(--text-muted); padding: 20px;">Aktif pozisyon yok</td></tr>';
         }
     }
 
@@ -425,7 +427,7 @@ function updateStats() {
     const equity = state.equity || 10000;
     const pnl = state.pnl || 0;
     const pnlPct = state.pnl_pct || 0;
-    const initialBalance = 10000;
+    const initialBalance = 100;
     const equityPct = ((equity - initialBalance) / initialBalance) * 100;
 
     if (elements.equity) {
