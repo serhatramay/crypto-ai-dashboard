@@ -255,7 +255,7 @@ AI_CONFIG = {
     "trade_amount": 300,
     "check_interval": 60,  # 60 saniye (analiz aralığı)
     "stop_loss_pct": 5,
-    "take_profit_pct": 15,
+    "take_profit_pct": 25,
     "daily_loss_limit_pct": 10,  # Günlük max kayıp: bakiyenin %10'u
     "min_volume_ratio": 0.5,  # Hacim filtresi daha gevşek
     "candle_period": 300,  # 5 dakikalık mumlar (saniye)
@@ -1516,9 +1516,9 @@ class PaperTradingState:
             # ATR tabanlı dinamik TP/SL (coin volatilitesine göre)
             if atr and atr > 0 and price > 0:
                 atr_pct = (atr / price) * 100  # ATR'nin fiyata oranı (%)
-                # SL: 3x ATR (nefes alanı), TP: 3:1 risk/reward
+                # SL: 3x ATR (nefes alanı), TP: 5:1 risk/reward
                 dynamic_sl_pct = max(5, min(10, atr_pct * 3 * leverage))
-                dynamic_tp_pct = max(15, min(30, dynamic_sl_pct * 3))
+                dynamic_tp_pct = max(25, min(50, dynamic_sl_pct * 5))
             else:
                 dynamic_tp_pct = AI_CONFIG["take_profit_pct"]
                 dynamic_sl_pct = AI_CONFIG["stop_loss_pct"]
