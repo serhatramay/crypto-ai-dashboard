@@ -649,7 +649,6 @@ class AITradingBot:
         self.fear_greed = {"value": 50, "label": "Neutral"}
         # Sentiment verileri
         self.news_sentiment = {"score": 0, "count": 0, "headlines": []}
-        self.whale_sentiment = {"score": 0, "inflow_usd": 0, "outflow_usd": 0, "tx_count": 0}
         self.geo_sentiment = {"score": 0, "keywords_found": []}
         self.data_ready = False
         # Soğuma süresi: coin başına son kapanış zamanı
@@ -820,53 +819,6 @@ class AITradingBot:
                 print(f"[AI Bot] Geo Sentiment: {self.geo_sentiment['score']} (keywords: {', '.join(geo_keywords[:5])})")
         except Exception as e:
             print(f"[AI Bot] CryptoPanic fetch failed: {e}")
-
-    def fetch_whale_alerts(self):
-        """Whale Alert API'den büyük transfer verisi çek"""
-        api_key = os.environ.get('WHALE_ALERT_API_KEY', '')
-        if not api_key:
-            return
-        try:
-            # Son 1 saatteki $500K+ transferler
-            start_time = int(time.time()) - 3600
-            url = f'https://api.whale-alert.io/v1/transactions?api_key={api_key}&start={start_time}&min_value=500000'
-            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
-                transactions = data.get('transactions', [])
-
-                inflow_usd = 0
-                outflow_usd = 0
-                tx_count = len(transactions)
-
-                for tx in transactions:
-                    # Sadece BTC, ETH, SOL filtrele
-                    symbol = tx.get('symbol', '').lower()
-                    if symbol not in ['btc', 'eth', 'sol', 'usdt', 'usdc']:
-                        continue
-
-                    amount_usd = tx.get('amount_usd', 0)
-                    from_type = tx.get('from', {}).get('owner_type', '').lower()
-                    to_type = tx.get('to', {}).get('owner_type', '').lower()
-
-                    if from_type != 'exchange' and to_type == 'exchange':
-                        inflow_usd += amount_usd  # Borsaya giriş = satış baskısı
-                    elif from_type == 'exchange' and to_type != 'exchange':
-                        outflow_usd += amount_usd  # Borsadan çıkış = bullish
-
-                # Skor: outflow > inflow = bullish, inflow > outflow = bearish
-                total = inflow_usd + outflow_usd
-                whale_score = (outflow_usd - inflow_usd) / total if total > 0 else 0
-
-                self.whale_sentiment = {
-                    "score": round(whale_score, 2),
-                    "inflow_usd": round(inflow_usd),
-                    "outflow_usd": round(outflow_usd),
-                    "tx_count": tx_count
-                }
-                print(f"[AI Bot] Whale Flow: score={self.whale_sentiment['score']} | in=${inflow_usd:,.0f} out=${outflow_usd:,.0f} ({tx_count} tx)")
-        except Exception as e:
-            print(f"[AI Bot] Whale Alert fetch failed: {e}")
 
     def get_prices(self, symbol):
         """Saatlik + kısa vadeli fiyatları birleştir"""
@@ -1117,22 +1069,18 @@ class AITradingBot:
         news_score = self.news_sentiment.get('score', 0)  # -1 ile +1 arası
         scores['news_sentiment'] = round(news_score * 80)  # -80 ile +80 arası
 
-        # 15. Balina Akışı (Whale Alert)
-        whale_score = self.whale_sentiment.get('score', 0)  # -1 ile +1 arası
-        scores['whale_flow'] = round(whale_score * 70)  # -70 ile +70 arası
-
-        # 16. Jeopolitik Sentiment (keyword analizi)
+        # 15. Jeopolitik Sentiment (keyword analizi)
         geo_score = self.geo_sentiment.get('score', 0)  # -1 ile +1 arası
         scores['geopolitical'] = round(geo_score * 90)  # -90 ile +90 arası
 
         # === AĞIRLIKLI TOPLAM SKOR ===
         weights = {
-            'rsi': 0.06, 'macd': 0.06, 'bollinger': 0.04,
-            'ema_cross': 0.08, 'trend': 0.08, 'sr': 0.04,
-            'fear_greed': 0.06, 'volume': 0.03, 'fvg': 0.04,
-            'divergence': 0.04, 'order_block': 0.04, 'liquidity': 0.04,
-            'momentum_24h': 0.11,
-            'news_sentiment': 0.10, 'whale_flow': 0.08, 'geopolitical': 0.10
+            'rsi': 0.06, 'macd': 0.06, 'bollinger': 0.05,
+            'ema_cross': 0.08, 'trend': 0.08, 'sr': 0.05,
+            'fear_greed': 0.06, 'volume': 0.03, 'fvg': 0.05,
+            'divergence': 0.05, 'order_block': 0.05, 'liquidity': 0.05,
+            'momentum_24h': 0.12,
+            'news_sentiment': 0.10, 'geopolitical': 0.11
         }
         total_score = sum(scores.get(k, 0) * w for k, w in weights.items())
         total_score *= vol_multiplier  # Hacim çarpanı uygula
@@ -1225,7 +1173,6 @@ class AITradingBot:
             "liquidity_sweep": round(liq_score, 1),
             "htf_trend": htf_trend,
             "news_sentiment": self.news_sentiment,
-            "whale_flow": self.whale_sentiment,
             "geopolitical": self.geo_sentiment,
             "scores": {k: round(v, 1) for k, v in scores.items()},
             "total_score": round(total_score, 1)
@@ -1259,9 +1206,6 @@ class AITradingBot:
         if abs(scores.get('news_sentiment', 0)) > 15:
             news_dir = "bullish" if scores['news_sentiment'] > 0 else "bearish"
             reasons.append(f"NEWS:{news_dir}")
-        if abs(scores.get('whale_flow', 0)) > 15:
-            whale_dir = "çıkış" if scores['whale_flow'] > 0 else "giriş"
-            reasons.append(f"WHALE:{whale_dir}")
         if abs(scores.get('geopolitical', 0)) > 15:
             geo_dir = "olumlu" if scores['geopolitical'] > 0 else "risk"
             reasons.append(f"GEO:{geo_dir}")
@@ -1368,7 +1312,6 @@ class AITradingBot:
         self.fetch_historical_candles()
         self.fetch_fear_greed()
         self.fetch_crypto_news()
-        self.fetch_whale_alerts()
 
         fg_timer = 0
         sentiment_timer = 0
@@ -1391,7 +1334,6 @@ class AITradingBot:
                     fg_timer = 0
                 if sentiment_timer >= 60:
                     self.fetch_crypto_news()
-                    self.fetch_whale_alerts()
                     sentiment_timer = 0
 
                 # Tarihsel veri yoksa 5 dakikada bir tekrar dene
