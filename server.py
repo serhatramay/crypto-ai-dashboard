@@ -255,12 +255,13 @@ AI_CONFIG = {
     "trade_amount": 300,
     "check_interval": 60,  # 60 saniye (analiz aralığı)
     "stop_loss_pct": 5,
-    "take_profit_pct": 10,
+    "take_profit_pct": 15,
     "daily_loss_limit_pct": 10,  # Günlük max kayıp: bakiyenin %10'u
     "min_volume_ratio": 0.5,  # Hacim filtresi daha gevşek
     "candle_period": 300,  # 5 dakikalık mumlar (saniye)
     "min_hold_time": 1800,  # Minimum tutma süresi: 30 dakika (saniye)
     "cooldown": 300,  # Cooldown: 5 dakika (saniye)
+    "min_candles": 20,  # Minimum mum sayısı (analiz için)
 }
 
 # ============================================================
@@ -1011,10 +1012,10 @@ class AITradingBot:
                 trend_conflict = True
 
         # === KARAR ===
-        min_agreement = 2  # En az 2 gösterge uyumu
-        if total_score > 20 and bullish_count >= min_agreement and not trend_conflict:
+        min_agreement = 3  # En az 3 gösterge uyumu
+        if total_score > 35 and bullish_count >= min_agreement and not trend_conflict:
             signal = "buy"
-        elif total_score < -20 and bearish_count >= min_agreement and not trend_conflict:
+        elif total_score < -35 and bearish_count >= min_agreement and not trend_conflict:
             signal = "sell"
         else:
             signal = "hold"
@@ -1136,8 +1137,8 @@ class AITradingBot:
         hold_time = time.time() - open_ts if open_ts else float('inf')
         is_mature = hold_time >= AI_CONFIG["min_hold_time"]  # 30 dakika
 
-        # Acil stop loss - HER ZAMAN aktif (kayıp %20'yi geçerse hemen kapat)
-        if pnl_pct <= -20:
+        # Acil stop loss - HER ZAMAN aktif (kayıp %12'yi geçerse hemen kapat)
+        if pnl_pct <= -12:
             return True, f"Acil Stop Loss (-%{abs(pnl_pct):.1f})"
 
         # Normal stop loss - HER ZAMAN aktif (dinamik)
@@ -1290,6 +1291,11 @@ class AITradingBot:
                     for symbol in self.SYMBOLS:
                         price_data = self.state.prices.get(symbol)
                         if not price_data:
+                            continue
+
+                        # Yetersiz veri kontrolü - minimum mum sayısı olmadan işlem açma
+                        candle_count = len(self.candle_closes.get(symbol, []))
+                        if candle_count < AI_CONFIG["min_candles"]:
                             continue
 
                         signal, reason, leverage, indicators = self.analyze_market(symbol, price_data)
@@ -1510,9 +1516,9 @@ class PaperTradingState:
             # ATR tabanlı dinamik TP/SL (coin volatilitesine göre)
             if atr and atr > 0 and price > 0:
                 atr_pct = (atr / price) * 100  # ATR'nin fiyata oranı (%)
-                # TP: 2x ATR, SL: 1x ATR (2:1 risk/reward)
-                dynamic_tp_pct = max(3, min(15, atr_pct * 2 * leverage))
-                dynamic_sl_pct = max(2, min(7, atr_pct * 1 * leverage))
+                # SL: 3x ATR (nefes alanı), TP: 3:1 risk/reward
+                dynamic_sl_pct = max(5, min(10, atr_pct * 3 * leverage))
+                dynamic_tp_pct = max(15, min(30, dynamic_sl_pct * 3))
             else:
                 dynamic_tp_pct = AI_CONFIG["take_profit_pct"]
                 dynamic_sl_pct = AI_CONFIG["stop_loss_pct"]
