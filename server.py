@@ -250,12 +250,12 @@ def send_telegram(message):
 
 # AI Trading Configuration
 AI_CONFIG = {
-    "max_positions": 3,
-    "max_same_direction": 3,  # 3 coin, 3 pozisyon
+    "max_positions": 1,
+    "max_same_direction": 1,  # Tek pozisyon
     "trade_amount": 30,
     "check_interval": 60,  # 60 saniye (analiz aralığı)
-    "stop_loss_pct": 5,
-    "take_profit_pct": 25,
+    "stop_loss_pct": 10,
+    "take_profit_pct": 50,
     "daily_loss_limit_pct": 10,  # Günlük max kayıp: bakiyenin %10'u
     "min_volume_ratio": 0.5,  # Hacim filtresi daha gevşek
     "candle_period": 300,  # 5 dakikalık mumlar (saniye)
@@ -1663,9 +1663,9 @@ class PaperTradingState:
             # ATR tabanlı dinamik TP/SL (coin volatilitesine göre)
             if atr and atr > 0 and price > 0:
                 atr_pct = (atr / price) * 100  # ATR'nin fiyata oranı (%)
-                # SL: 3x ATR (nefes alanı), TP: 5:1 risk/reward
-                dynamic_sl_pct = max(5, min(10, atr_pct * 3 * leverage))
-                dynamic_tp_pct = max(25, min(50, dynamic_sl_pct * 5))
+                # SL: 5x ATR (geniş nefes alanı), TP: 5:1 risk/reward
+                dynamic_sl_pct = max(10, min(20, atr_pct * 5 * leverage))
+                dynamic_tp_pct = max(50, min(100, dynamic_sl_pct * 5))
             else:
                 dynamic_tp_pct = AI_CONFIG["take_profit_pct"]
                 dynamic_sl_pct = AI_CONFIG["stop_loss_pct"]
