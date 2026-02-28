@@ -395,6 +395,10 @@ class AITradingBot:
         # Fear & Greed Index
         self.fear_greed = {"value": 50, "label": "Neutral"}
         self.data_ready = False
+        # Soğuma süresi: coin başına son kapanış zamanı
+        self.cooldown_until = {s: 0 for s in self.SYMBOLS}
+        # Trailing stop: pozisyon ID → en yüksek kâr %
+        self.peak_pnl_pct = {}
 
     def feed_price(self, symbol, price):
         """Price updater'dan fiyat geçmişini besle"""
@@ -537,10 +541,10 @@ class AITradingBot:
             if momentum != 0:
                 reasons.append(f"Mom:{'↑' if momentum > 0 else '↓'}{abs(momentum):.2f}%")
 
-            if score > 10:
-                signal, lev = "buy", 15
-            elif score < -10:
-                signal, lev = "sell", 15
+            if score > 30:
+                signal, lev = "buy", 10
+            elif score < -30:
+                signal, lev = "sell", 10
             else:
                 signal, lev = "hold", 0
             reason_text = f"Skor:{score:.0f} (basit) | " + " + ".join(reasons) if reasons else f"Skor:{score:.0f} | Nötr"
@@ -667,26 +671,39 @@ class AITradingBot:
         total_score *= vol_multiplier  # Hacim çarpanı uygula
         total_score = max(-100, min(100, total_score))
 
+        # === GÖSTERGE UYUMU KONTROLÜ ===
+        # En az 3 gösterge aynı yönü göstermeli
+        bullish_count = sum(1 for k, v in scores.items() if v > 10 and k != 'volume')
+        bearish_count = sum(1 for k, v in scores.items() if v < -10 and k != 'volume')
+
+        # === TREND FİLTRESİ ===
+        # EMA50 yönüne ters işlem açma
+        trend_dir = scores.get('trend', 0)
+        trend_conflict = False
+        if trend_dir < -20 and total_score > 0:
+            trend_conflict = True  # Düşüş trendinde LONG açma
+        elif trend_dir > 20 and total_score < 0:
+            trend_conflict = True  # Yükseliş trendinde SHORT açma
+
         # === KARAR ===
-        if total_score > 10:
+        min_agreement = 3  # En az 3 gösterge uyumu
+        if total_score > 30 and bullish_count >= min_agreement and not trend_conflict:
             signal = "buy"
-        elif total_score < -10:
+        elif total_score < -30 and bearish_count >= min_agreement and not trend_conflict:
             signal = "sell"
         else:
             signal = "hold"
 
-        # === KALDIRAÇ (sinyal gücüne göre) ===
+        # === KALDIRAÇ (daha muhafazakâr) ===
         abs_score = abs(total_score)
-        if abs_score > 70:
-            leverage = 30
-        elif abs_score > 55:
-            leverage = 25
-        elif abs_score > 45:
+        if abs_score > 75:
             leverage = 20
-        elif abs_score > 35:
+        elif abs_score > 60:
             leverage = 15
-        else:
+        elif abs_score > 45:
             leverage = 10
+        else:
+            leverage = 5
 
         # === ANALİZ DETAYLARI ===
         indicators = {
@@ -731,13 +748,41 @@ class AITradingBot:
         for pos in self.state.positions:
             if pos['symbol'] == symbol:
                 return False
+        # Soğuma süresi kontrolü (15 dakika)
+        if time.time() < self.cooldown_until.get(symbol, 0):
+            return False
         return signal in ["buy", "sell"]
 
     def should_close_position(self, position):
-        """Akıllı çıkış - TP/SL + ters sinyal kontrolü"""
+        """Akıllı çıkış - Trailing SL + TP/SL + acil SL + ters sinyal"""
         pnl_pct = (position['pnl'] / position['margin']) * 100
+        pos_id = position['id']
+
+        # Acil stop loss - Render uyku vb. durumlar için güvenlik (kayıp %20'yi geçerse hemen kapat)
+        if pnl_pct <= -20:
+            return True, f"Acil Stop Loss (-%{abs(pnl_pct):.1f})"
+
+        # Normal stop loss
         if pnl_pct <= -AI_CONFIG["stop_loss_pct"]:
             return True, f"Stop Loss (-%{abs(pnl_pct):.1f})"
+
+        # Trailing Stop mekanizması
+        peak = self.peak_pnl_pct.get(pos_id, 0)
+        if pnl_pct > peak:
+            self.peak_pnl_pct[pos_id] = pnl_pct
+            peak = pnl_pct
+
+        if peak >= 5:
+            # Kâr %5'i geçtiyse, geri çekilme %40'ını tolere et (yani peak'in %60'ını koru)
+            trailing_sl = peak * 0.6
+            if pnl_pct <= trailing_sl:
+                return True, f"Trailing Stop (+%{pnl_pct:.1f}, zirve: +%{peak:.1f})"
+        elif peak >= 3:
+            # Kâr %3'ü geçtiyse, SL'yi breakeven'a taşı
+            if pnl_pct <= 0:
+                return True, f"Breakeven Stop (+%{pnl_pct:.1f}, zirve: +%{peak:.1f})"
+
+        # Take profit
         if pnl_pct >= AI_CONFIG["take_profit_pct"]:
             return True, f"Take Profit (+%{pnl_pct:.1f})"
 
@@ -812,6 +857,10 @@ class AITradingBot:
                     result = self.state.close_position(pos_id)
                     if result.get('status') == 'ok':
                         trade = result['trade']
+                        # Soğuma süresi başlat (15 dakika)
+                        self.cooldown_until[trade['symbol']] = time.time() + 900
+                        # Trailing stop verisini temizle
+                        self.peak_pnl_pct.pop(pos_id, None)
                         print(f"[AI Bot] CLOSED: {trade['symbol']} | PnL: ${trade['pnl']:.2f} | {reason}")
 
                         # Telegram bildirim
