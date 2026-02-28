@@ -1723,7 +1723,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             state.positions = []
             state.trades = []
             db_save_balance(state.balance)
-            self.serve_json({"status": "ok", "message": "All data reset to $10,000"})
+            self.serve_json({"status": "ok", "message": f"All data reset to ${state.initial_balance:,.0f}"})
 
         else:
             self.send_error(404)
