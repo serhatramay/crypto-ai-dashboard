@@ -474,6 +474,157 @@ class TechnicalAnalyzer:
             return "low", ratio
         return "normal", ratio
 
+    @staticmethod
+    def divergence(prices, period=14):
+        """RSI Divergence tespiti
+        Bullish Divergence: Fiyat düşük dip, RSI yüksek dip → yakında yükseliş
+        Bearish Divergence: Fiyat yüksek zirve, RSI düşük zirve → yakında düşüş
+        """
+        if len(prices) < period * 3:
+            return 0, "none"
+
+        # Son N periyotta RSI hesapla
+        window = min(len(prices), period * 4)
+        recent_prices = prices[-window:]
+        rsi_values = []
+        for i in range(period + 1, len(recent_prices) + 1):
+            rsi_values.append(TechnicalAnalyzer.rsi(recent_prices[:i], period))
+
+        if len(rsi_values) < period * 2:
+            return 0, "none"
+
+        # Son iki dip ve zirveyi bul
+        price_seg = recent_prices[-(len(rsi_values)):]
+        half = len(price_seg) // 2
+
+        # Dip noktaları (bullish divergence için)
+        price_low1 = min(price_seg[:half])
+        price_low2 = min(price_seg[half:])
+        rsi_low1 = min(rsi_values[:half])
+        rsi_low2 = min(rsi_values[half:])
+
+        # Zirve noktaları (bearish divergence için)
+        price_high1 = max(price_seg[:half])
+        price_high2 = max(price_seg[half:])
+        rsi_high1 = max(rsi_values[:half])
+        rsi_high2 = max(rsi_values[half:])
+
+        # Bullish Divergence: Fiyat daha düşük dip yapmış ama RSI daha yüksek dip yapmış
+        if price_low2 < price_low1 and rsi_low2 > rsi_low1 + 3:
+            strength = min(90, (rsi_low2 - rsi_low1) * 5)
+            return strength, "bullish"
+
+        # Bearish Divergence: Fiyat daha yüksek zirve yapmış ama RSI daha düşük zirve yapmış
+        if price_high2 > price_high1 and rsi_high2 < rsi_high1 - 3:
+            strength = min(90, (rsi_high1 - rsi_high2) * 5)
+            return -strength, "bearish"
+
+        return 0, "none"
+
+    @staticmethod
+    def order_blocks(candles_ohlc, current_price, lookback=30):
+        """Order Block tespiti - Kurumsal pozisyon bölgeleri
+        Güçlü bir hareketin öncesindeki son ters mum = order block
+        Bullish OB: Düşüş sonrası son kırmızı mum (ardından güçlü yükseliş)
+        Bearish OB: Yükseliş sonrası son yeşil mum (ardından güçlü düşüş)
+        """
+        if len(candles_ohlc) < 4 or current_price <= 0:
+            return 0
+
+        score = 0
+        start = max(0, len(candles_ohlc) - lookback)
+
+        for i in range(start + 1, len(candles_ohlc) - 2):
+            c_prev = candles_ohlc[i]
+            c_impulse = candles_ohlc[i + 1]
+            c_confirm = candles_ohlc[i + 2]
+
+            impulse_size = abs(c_impulse['close'] - c_impulse['open'])
+            avg_size = sum(abs(c['close'] - c['open']) for c in candles_ohlc[max(0, i-5):i+1]) / min(6, i+1)
+
+            if avg_size == 0:
+                continue
+
+            # Güçlü hareket mi? (ortalama mum boyutunun 2 katından büyük)
+            if impulse_size < avg_size * 2:
+                continue
+
+            age = len(candles_ohlc) - 1 - i
+            age_decay = max(0.3, 1 - age * 0.04)
+
+            # Bullish Order Block: Kırmızı mum + ardından güçlü yeşil hareket
+            if c_prev['close'] < c_prev['open'] and c_impulse['close'] > c_impulse['open']:
+                ob_top = c_prev['open']
+                ob_bottom = c_prev['low']
+                # Fiyat OB bölgesinde mi?
+                if current_price >= ob_bottom * 0.998 and current_price <= ob_top * 1.002:
+                    score = max(score, 75 * age_decay)
+                elif current_price >= ob_bottom * 0.995 and current_price < ob_bottom:
+                    score = max(score, 40 * age_decay)
+
+            # Bearish Order Block: Yeşil mum + ardından güçlü kırmızı hareket
+            elif c_prev['close'] > c_prev['open'] and c_impulse['close'] < c_impulse['open']:
+                ob_top = c_prev['high']
+                ob_bottom = c_prev['close']
+                if current_price >= ob_bottom * 0.998 and current_price <= ob_top * 1.002:
+                    score = min(score, -75 * age_decay)
+                elif current_price <= ob_top * 1.005 and current_price > ob_top:
+                    score = min(score, -40 * age_decay)
+
+        return max(-100, min(100, score))
+
+    @staticmethod
+    def liquidity_sweep(candles_ohlc, current_price, lookback=40):
+        """Liquidity Sweep tespiti - Stop Hunt / Likidite Avı
+        Fiyat önceki bir tepe/dibi kısa süreliğine kırar, sonra geri döner.
+        Büyük oyuncuların stop-loss'ları tetikleyip likidite topladığı an.
+        """
+        if len(candles_ohlc) < 10 or current_price <= 0:
+            return 0
+
+        score = 0
+        start = max(0, len(candles_ohlc) - lookback)
+        recent = candles_ohlc[start:]
+
+        # Son birkaç mumdaki swing high/low'ları bul
+        swing_highs = []
+        swing_lows = []
+        for i in range(2, len(recent) - 2):
+            if recent[i]['high'] >= max(recent[i-1]['high'], recent[i-2]['high'], recent[i+1]['high'], recent[i+2]['high']):
+                swing_highs.append({'price': recent[i]['high'], 'idx': i})
+            if recent[i]['low'] <= min(recent[i-1]['low'], recent[i-2]['low'], recent[i+1]['low'], recent[i+2]['low']):
+                swing_lows.append({'price': recent[i]['low'], 'idx': i})
+
+        if not swing_highs and not swing_lows:
+            return 0
+
+        # Son 3 muma bak - sweep oldu mu?
+        last_candles = recent[-3:] if len(recent) >= 3 else recent
+        last_high = max(c['high'] for c in last_candles)
+        last_low = min(c['low'] for c in last_candles)
+        last_close = recent[-1]['close']
+
+        # Bullish Sweep: Fiyat swing low'un altına düştü ama geri kapandı
+        for sl in swing_lows:
+            if sl['idx'] >= len(recent) - 3:
+                continue  # Son mumların kendisi değil, önceki swing'ler
+            if last_low < sl['price'] and last_close > sl['price']:
+                # Sweep oldu ve geri döndü → bullish
+                sweep_depth = (sl['price'] - last_low) / current_price * 100
+                if sweep_depth > 0.05:  # En az %0.05 sweep
+                    score = max(score, min(85, sweep_depth * 100))
+
+        # Bearish Sweep: Fiyat swing high'ın üstüne çıktı ama geri kapandı
+        for sh in swing_highs:
+            if sh['idx'] >= len(recent) - 3:
+                continue
+            if last_high > sh['price'] and last_close < sh['price']:
+                sweep_depth = (last_high - sh['price']) / current_price * 100
+                if sweep_depth > 0.05:
+                    score = min(score, max(-85, -sweep_depth * 100))
+
+        return max(-100, min(100, score))
+
 
 class AITradingBot:
     """Profesyonel seviye AI trading bot - çoklu gösterge analizi"""
@@ -690,6 +841,12 @@ class AITradingBot:
         # FVG (Fair Value Gap) hesapla
         ohlc_data = self.candles_ohlc.get(symbol, [])
         fvgs, fvg_score = TechnicalAnalyzer.fair_value_gaps(ohlc_data, current_price, lookback=30)
+        # Divergence (RSI uyumsuzluğu)
+        div_score, div_type = TechnicalAnalyzer.divergence(prices, 14)
+        # Order Block
+        ob_score = TechnicalAnalyzer.order_blocks(ohlc_data, current_price, lookback=30)
+        # Liquidity Sweep
+        liq_score = TechnicalAnalyzer.liquidity_sweep(ohlc_data, current_price, lookback=40)
 
         # === SKOR SİSTEMİ (-100 ile +100 arası) ===
         scores = {}
@@ -790,14 +947,24 @@ class AITradingBot:
             vol_multiplier = 0.7
         scores['volume'] = 0  # Hacim tek başına sinyal vermez, çarpan olarak kullanılır
 
-        # 9. FVG - Fair Value Gap (ağırlık: %15)
+        # 9. FVG - Fair Value Gap (ağırlık: %14)
         scores['fvg'] = fvg_score
+
+        # 10. Divergence - RSI Uyumsuzluğu (ağırlık: %10)
+        scores['divergence'] = div_score
+
+        # 11. Order Block - Kurumsal Bölge (ağırlık: %10)
+        scores['order_block'] = ob_score
+
+        # 12. Liquidity Sweep - Likidite Avı (ağırlık: %8)
+        scores['liquidity'] = liq_score
 
         # === AĞIRLIKLI TOPLAM SKOR ===
         weights = {
-            'rsi': 0.12, 'macd': 0.17, 'bollinger': 0.12,
-            'ema_cross': 0.12, 'trend': 0.08, 'sr': 0.08,
-            'fear_greed': 0.08, 'volume': 0.05, 'fvg': 0.18
+            'rsi': 0.08, 'macd': 0.12, 'bollinger': 0.08,
+            'ema_cross': 0.08, 'trend': 0.06, 'sr': 0.06,
+            'fear_greed': 0.06, 'volume': 0.04, 'fvg': 0.14,
+            'divergence': 0.10, 'order_block': 0.10, 'liquidity': 0.08
         }
         total_score = sum(scores.get(k, 0) * w for k, w in weights.items())
         total_score *= vol_multiplier  # Hacim çarpanı uygula
@@ -808,14 +975,40 @@ class AITradingBot:
         bullish_count = sum(1 for k, v in scores.items() if v > 10 and k != 'volume')
         bearish_count = sum(1 for k, v in scores.items() if v < -10 and k != 'volume')
 
-        # === TREND FİLTRESİ ===
-        # EMA50 yönüne ters işlem açma
-        trend_dir = scores.get('trend', 0)
+        # === MULTI-TIMEFRAME FİLTRE ===
+        # Saatlik mumlar (tarihsel veri) = üst zaman dilimi
+        # 5dk mumlar (canlı) = alt zaman dilimi
+        hourly_closes = list(self.candle_closes.get(symbol, []))
         trend_conflict = False
-        if trend_dir < -20 and total_score > 0:
-            trend_conflict = True  # Düşüş trendinde LONG açma
-        elif trend_dir > 20 and total_score < 0:
-            trend_conflict = True  # Yükseliş trendinde SHORT açma
+        htf_trend = "neutral"
+        if len(hourly_closes) >= 50:
+            htf_ema20 = TechnicalAnalyzer.ema_series(hourly_closes, 20)
+            htf_ema50 = TechnicalAnalyzer.ema_series(hourly_closes, 50)
+            if htf_ema20 and htf_ema50:
+                if htf_ema20[-1] > htf_ema50[-1]:
+                    htf_trend = "bullish"
+                else:
+                    htf_trend = "bearish"
+                # Üst zaman dilimi ile çakışma kontrolü
+                if htf_trend == "bearish" and total_score > 0:
+                    total_score *= 0.6  # Sinyali zayıflat ama tamamen iptal etme
+                    trend_conflict = total_score < 20  # Zayıflatıldıktan sonra eşik altında mı?
+                elif htf_trend == "bullish" and total_score < 0:
+                    total_score *= 0.6
+                    trend_conflict = total_score > -20
+                elif htf_trend == "bullish" and total_score > 0:
+                    total_score *= 1.2  # Uyumlu trend = sinyali güçlendir
+                    total_score = min(100, total_score)
+                elif htf_trend == "bearish" and total_score < 0:
+                    total_score *= 1.2
+                    total_score = max(-100, total_score)
+        else:
+            # Yeterli veri yoksa EMA50 trend filtresi kullan
+            trend_dir = scores.get('trend', 0)
+            if trend_dir < -20 and total_score > 0:
+                trend_conflict = True
+            elif trend_dir > 20 and total_score < 0:
+                trend_conflict = True
 
         # === KARAR ===
         min_agreement = 2  # En az 2 gösterge uyumu
@@ -859,6 +1052,10 @@ class AITradingBot:
                 "count": len(fvgs),
                 "active": [{"type": f['type'], "top": round(f['top'], 2), "bottom": round(f['bottom'], 2), "filled": f['filled']} for f in fvgs[-3:]]
             },
+            "divergence": {"score": round(div_score, 1), "type": div_type},
+            "order_block": round(ob_score, 1),
+            "liquidity_sweep": round(liq_score, 1),
+            "htf_trend": htf_trend,
             "scores": {k: round(v, 1) for k, v in scores.items()},
             "total_score": round(total_score, 1)
         }
@@ -880,6 +1077,14 @@ class AITradingBot:
         if abs(scores.get('fvg', 0)) > 20:
             fvg_dir = "alım" if scores['fvg'] > 0 else "satım"
             reasons.append(f"FVG:{fvg_dir}")
+        if abs(scores.get('divergence', 0)) > 20:
+            reasons.append(f"DIV:{div_type}")
+        if abs(scores.get('order_block', 0)) > 20:
+            ob_dir = "destek" if scores['order_block'] > 0 else "direnç"
+            reasons.append(f"OB:{ob_dir}")
+        if abs(scores.get('liquidity', 0)) > 20:
+            liq_dir = "sweep↑" if scores['liquidity'] > 0 else "sweep↓"
+            reasons.append(f"LIQ:{liq_dir}")
 
         reason_text = f"Skor:{total_score:.0f} | " + " + ".join(reasons) if reasons else f"Skor:{total_score:.0f} | Nötr"
 
