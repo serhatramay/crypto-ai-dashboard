@@ -250,14 +250,17 @@ def send_telegram(message):
 
 # AI Trading Configuration
 AI_CONFIG = {
-    "max_positions": 5,
-    "max_same_direction": 2,  # Aynı yönde max 2 pozisyon (LONG+LONG veya SHORT+SHORT)
-    "trade_amount": 500,
-    "check_interval": 300,  # 5 dakika
+    "max_positions": 10,
+    "max_same_direction": 5,  # Aynı yönde max 5 pozisyon
+    "trade_amount": 300,
+    "check_interval": 60,  # 60 saniye (analiz aralığı)
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
-    "daily_loss_limit_pct": 5,  # Günlük max kayıp: bakiyenin %5'i
-    "min_volume_ratio": 0.8,  # Min hacim oranı (ortalamanın 0.8 katı altında işlem açma)
+    "daily_loss_limit_pct": 10,  # Günlük max kayıp: bakiyenin %10'u
+    "min_volume_ratio": 0.5,  # Hacim filtresi daha gevşek
+    "candle_period": 300,  # 5 dakikalık mumlar (saniye)
+    "min_hold_time": 1800,  # Minimum tutma süresi: 30 dakika (saniye)
+    "cooldown": 300,  # Cooldown: 5 dakika (saniye)
 }
 
 # ============================================================
@@ -395,8 +398,9 @@ class TechnicalAnalyzer:
 
 class AITradingBot:
     """Profesyonel seviye AI trading bot - çoklu gösterge analizi"""
-    SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
-    SYMBOL_MAP = {"BTCUSDT": "BTC", "ETHUSDT": "ETH", "SOLUSDT": "SOL", "XRPUSDT": "XRP"}
+    SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "MATICUSDT"]
+    SYMBOL_MAP = {"BTCUSDT": "BTC", "ETHUSDT": "ETH", "SOLUSDT": "SOL", "XRPUSDT": "XRP", "DOGEUSDT": "DOGE", "ADAUSDT": "ADA", "AVAXUSDT": "AVAX", "LINKUSDT": "LINK", "DOTUSDT": "DOT", "MATICUSDT": "MATIC"}
+    COINGECKO_IDS = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "XRP": "ripple", "DOGE": "dogecoin", "ADA": "cardano", "AVAX": "avalanche-2", "LINK": "chainlink", "DOT": "polkadot", "MATIC": "matic-network"}
 
     def __init__(self, state):
         self.state = state
@@ -432,8 +436,7 @@ class AITradingBot:
         for symbol in self.SYMBOLS:
             coin = self.SYMBOL_MAP[symbol]
             # Birden fazla API dene
-            coin_ids = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "XRP": "ripple"}
-            coin_id = coin_ids.get(coin, coin.lower())
+            coin_id = self.COINGECKO_IDS.get(coin, coin.lower())
             apis = [
                 ("cryptocompare", f'https://min-api.cryptocompare.com/data/v2/histohour?fsym={coin}&tsym=USD&limit=200'),
                 ("coingecko", f'https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=8'),
@@ -560,10 +563,10 @@ class AITradingBot:
             if momentum != 0:
                 reasons.append(f"Mom:{'↑' if momentum > 0 else '↓'}{abs(momentum):.2f}%")
 
-            if score > 30:
-                signal, lev = "buy", 10
-            elif score < -30:
-                signal, lev = "sell", 10
+            if score > 20:
+                signal, lev = "buy", 15
+            elif score < -20:
+                signal, lev = "sell", 15
             else:
                 signal, lev = "hold", 0
             reason_text = f"Skor:{score:.0f} (basit) | " + " + ".join(reasons) if reasons else f"Skor:{score:.0f} | Nötr"
@@ -706,24 +709,26 @@ class AITradingBot:
             trend_conflict = True  # Yükseliş trendinde SHORT açma
 
         # === KARAR ===
-        min_agreement = 3  # En az 3 gösterge uyumu
-        if total_score > 30 and bullish_count >= min_agreement and not trend_conflict:
+        min_agreement = 2  # En az 2 gösterge uyumu
+        if total_score > 20 and bullish_count >= min_agreement and not trend_conflict:
             signal = "buy"
-        elif total_score < -30 and bearish_count >= min_agreement and not trend_conflict:
+        elif total_score < -20 and bearish_count >= min_agreement and not trend_conflict:
             signal = "sell"
         else:
             signal = "hold"
 
-        # === KALDIRAÇ (daha muhafazakâr) ===
+        # === KALDIRAÇ (agresif) ===
         abs_score = abs(total_score)
         if abs_score > 75:
-            leverage = 20
+            leverage = 30
         elif abs_score > 60:
-            leverage = 15
+            leverage = 25
         elif abs_score > 45:
-            leverage = 10
+            leverage = 20
+        elif abs_score > 30:
+            leverage = 15
         else:
-            leverage = 5
+            leverage = 10
 
         # === ANALİZ DETAYLARI ===
         indicators = {
@@ -771,7 +776,7 @@ class AITradingBot:
         for pos in self.state.positions:
             if pos['symbol'] == symbol:
                 return False
-        # Soğuma süresi kontrolü (15 dakika)
+        # Soğuma süresi kontrolü (5 dakika)
         if time.time() < self.cooldown_until.get(symbol, 0):
             return False
         # Aynı yönde max pozisyon kontrolü
@@ -804,33 +809,41 @@ class AITradingBot:
         sl_pct = position.get('dynamic_sl_pct', AI_CONFIG["stop_loss_pct"])
         tp_pct = position.get('dynamic_tp_pct', AI_CONFIG["take_profit_pct"])
 
-        # Acil stop loss - Render uyku vb. durumlar için güvenlik (kayıp %20'yi geçerse hemen kapat)
+        # Minimum tutma süresi kontrolü
+        open_ts = position.get('open_timestamp', 0)
+        hold_time = time.time() - open_ts if open_ts else float('inf')
+        is_mature = hold_time >= AI_CONFIG["min_hold_time"]  # 30 dakika
+
+        # Acil stop loss - HER ZAMAN aktif (kayıp %20'yi geçerse hemen kapat)
         if pnl_pct <= -20:
             return True, f"Acil Stop Loss (-%{abs(pnl_pct):.1f})"
 
-        # Normal stop loss (dinamik)
+        # Normal stop loss - HER ZAMAN aktif (dinamik)
         if pnl_pct <= -sl_pct:
             return True, f"Stop Loss (-%{abs(pnl_pct):.1f})"
 
-        # Trailing Stop mekanizması
+        # Take profit - HER ZAMAN aktif (dinamik)
+        if pnl_pct >= tp_pct:
+            return True, f"Take Profit (+%{pnl_pct:.1f})"
+
+        # Peak tracking - HER ZAMAN çalışır (zirveyi yakala)
         peak = self.peak_pnl_pct.get(pos_id, 0)
         if pnl_pct > peak:
             self.peak_pnl_pct[pos_id] = pnl_pct
             peak = pnl_pct
 
+        # === Aşağıdaki kurallar sadece minimum tutma süresi geçtikten sonra aktif ===
+        if not is_mature:
+            return False, None
+
+        # Trailing Stop mekanizması
         if peak >= 5:
-            # Kâr %5'i geçtiyse, geri çekilme %40'ını tolere et (yani peak'in %60'ını koru)
             trailing_sl = peak * 0.6
             if pnl_pct <= trailing_sl:
                 return True, f"Trailing Stop (+%{pnl_pct:.1f}, zirve: +%{peak:.1f})"
         elif peak >= 3:
-            # Kâr %3'ü geçtiyse, SL'yi breakeven'a taşı
             if pnl_pct <= 0:
                 return True, f"Breakeven Stop (+%{pnl_pct:.1f}, zirve: +%{peak:.1f})"
-
-        # Take profit (dinamik)
-        if pnl_pct >= tp_pct:
-            return True, f"Take Profit (+%{pnl_pct:.1f})"
 
         # Ters sinyal kontrolü - pozisyon yönüne ters güçlü sinyal varsa kapat
         symbol = position['symbol']
@@ -838,9 +851,9 @@ class AITradingBot:
         if price_data and self.data_ready:
             signal, _, _, indicators = self.analyze_market(symbol, price_data)
             score = indicators.get('total_score', 0)
-            if position['side'] == 'buy' and score < -50:
+            if position['side'] == 'buy' and score < -70:
                 return True, f"Ters sinyal (skor:{score:.0f})"
-            elif position['side'] == 'sell' and score > 50:
+            elif position['side'] == 'sell' and score > 70:
                 return True, f"Ters sinyal (skor:{score:.0f})"
 
         return False, None
@@ -855,13 +868,17 @@ class AITradingBot:
 
         fg_timer = 0
         candle_timer = 0
+        analysis_timer = 0
         retry_history = 0
+        loop_interval = 30  # Ana döngü 30 saniyede bir çalışır
+        candle_ticks = AI_CONFIG["candle_period"] // loop_interval  # 5dk mum = 10 tick
+        analysis_ticks = max(1, AI_CONFIG["check_interval"] // loop_interval)  # 60sn analiz = 2 tick
 
         while self.running:
             try:
                 self.state.update_prices()
 
-                # Fear & Greed her 30 dakikada güncelle
+                # Fear & Greed her 30 dakikada güncelle (60 * 30sn = 30dk)
                 fg_timer += 1
                 if fg_timer >= 60:
                     self.fetch_fear_greed()
@@ -870,14 +887,14 @@ class AITradingBot:
                 # Tarihsel veri yoksa 5 dakikada bir tekrar dene
                 if not self.data_ready:
                     retry_history += 1
-                    if retry_history >= 10:  # 10 * 30sn = 5dk
+                    if retry_history >= 10:
                         print("[AI Bot] Retrying historical data fetch...")
                         self.fetch_historical_candles()
                         retry_history = 0
 
-                # Canlı fiyatlardan 1 dakikalık mum biriktir
+                # Canlı fiyatlardan 5 dakikalık mum biriktir
                 candle_timer += 1
-                if candle_timer >= 2:  # 2 * 30sn = 1dk
+                if candle_timer >= candle_ticks:
                     for sym in self.SYMBOLS:
                         live = self.price_history.get(sym, [])
                         if live:
@@ -885,14 +902,13 @@ class AITradingBot:
                             if len(self.candle_closes[sym]) > 500:
                                 self.candle_closes[sym].pop(0)
                     candle_timer = 0
-                    # Her coin için en az 30 mum (30dk) birikince full moda geç
                     ready_count = sum(1 for v in self.candle_closes.values() if len(v) >= 30)
-                    if ready_count >= 3 and not self.data_ready:
+                    if ready_count >= len(self.SYMBOLS) // 2 and not self.data_ready:
                         self.data_ready = True
                         candle_info = {s: len(v) for s, v in self.candle_closes.items()}
                         print(f"[AI Bot] FULL analysis mode active! Candles: {candle_info}")
 
-                # Stop loss / take profit / ters sinyal kontrolü
+                # Stop loss / take profit kontrolü - HER 30 SANİYEDE
                 positions_to_close = []
                 for pos in self.state.positions:
                     should_close, reason = self.should_close_position(pos)
@@ -903,16 +919,12 @@ class AITradingBot:
                     result = self.state.close_position(pos_id)
                     if result.get('status') == 'ok':
                         trade = result['trade']
-                        # Soğuma süresi başlat (15 dakika)
-                        self.cooldown_until[trade['symbol']] = time.time() + 900
-                        # Trailing stop verisini temizle
+                        self.cooldown_until[trade['symbol']] = time.time() + AI_CONFIG["cooldown"]
                         self.peak_pnl_pct.pop(pos_id, None)
-                        # Günlük kayıp takibi
                         if trade['pnl'] < 0:
                             self.daily_loss += abs(trade['pnl'])
                         print(f"[AI Bot] CLOSED: {trade['symbol']} | PnL: ${trade['pnl']:.2f} | {reason}")
 
-                        # Telegram bildirim
                         pnl = trade['pnl']
                         pnl_emoji = "✅" if pnl >= 0 else "❌"
                         side_text = "LONG" if trade['side'] == 'buy' else "SHORT"
@@ -934,57 +946,59 @@ class AITradingBot:
                         )
                         send_telegram(msg)
 
-                # Yeni pozisyon analizi
-                for symbol in self.SYMBOLS:
-                    price_data = self.state.prices.get(symbol)
-                    if not price_data:
-                        continue
+                # Yeni pozisyon analizi - her check_interval'de
+                analysis_timer += 1
+                if analysis_timer >= analysis_ticks:
+                    analysis_timer = 0
+                    for symbol in self.SYMBOLS:
+                        price_data = self.state.prices.get(symbol)
+                        if not price_data:
+                            continue
 
-                    signal, reason, leverage, indicators = self.analyze_market(symbol, price_data)
-                    self.last_analysis[symbol] = {
-                        "signal": signal,
-                        "reason": reason,
-                        "leverage": leverage,
-                        "indicators": indicators,
-                        "time": datetime.now(TR_TZ).strftime("%H:%M:%S")
-                    }
+                        signal, reason, leverage, indicators = self.analyze_market(symbol, price_data)
+                        self.last_analysis[symbol] = {
+                            "signal": signal,
+                            "reason": reason,
+                            "leverage": leverage,
+                            "indicators": indicators,
+                            "time": datetime.now(TR_TZ).strftime("%H:%M:%S")
+                        }
 
-                    if self.should_open_position(symbol, signal):
-                        atr_val = indicators.get('atr', 0)
-                        result = self.state.open_position(
-                            symbol=symbol, side=signal,
-                            amount=AI_CONFIG["trade_amount"], leverage=leverage,
-                            atr=atr_val
-                        )
-                        if result.get('status') == 'ok':
-                            pos = result['position']
-                            print(f"[AI Bot] OPENED: {pos['symbol']} {pos['side'].upper()} {leverage}x | Entry: ${pos['entry']:.2f} | {reason}")
-
-                            # Telegram bildirim
-                            self.state.update_position_pnl()
-                            tp = pos.get('tp_price', 0)
-                            sl = pos.get('sl_price', 0)
-                            emoji = "🟢" if signal == "buy" else "🔴"
-                            side_text = "LONG" if signal == "buy" else "SHORT"
-                            coin = pos['symbol'].replace('USDT', '')
-                            ind = indicators or {}
-                            rsi_val = ind.get('rsi', '-')
-                            score_val = ind.get('total_score', '-')
-                            msg = (
-                                f"{emoji} <b>{side_text} Açıldı</b>\n"
-                                f"━━━━━━━━━━━━━━━\n"
-                                f"🪙 Coin: <b>{coin}/USDT</b>\n"
-                                f"💰 Giriş: <b>${pos['entry']:,.2f}</b>\n"
-                                f"⚡ Kaldıraç: <b>{leverage}x</b>\n"
-                                f"🎯 TP: <b>${tp:,.2f}</b>\n"
-                                f"🛑 SL: <b>${sl:,.2f}</b>\n"
-                                f"━━━━━━━━━━━━━━━\n"
-                                f"📊 Skor: {score_val} | RSI: {rsi_val}\n"
-                                f"📝 {reason}"
+                        if self.should_open_position(symbol, signal):
+                            atr_val = indicators.get('atr', 0)
+                            result = self.state.open_position(
+                                symbol=symbol, side=signal,
+                                amount=AI_CONFIG["trade_amount"], leverage=leverage,
+                                atr=atr_val
                             )
-                            send_telegram(msg)
+                            if result.get('status') == 'ok':
+                                pos = result['position']
+                                print(f"[AI Bot] OPENED: {pos['symbol']} {pos['side'].upper()} {leverage}x | Entry: ${pos['entry']:.2f} | {reason}")
 
-                time.sleep(AI_CONFIG["check_interval"])
+                                self.state.update_position_pnl()
+                                tp = pos.get('tp_price', 0)
+                                sl = pos.get('sl_price', 0)
+                                emoji = "🟢" if signal == "buy" else "🔴"
+                                side_text = "LONG" if signal == "buy" else "SHORT"
+                                coin = pos['symbol'].replace('USDT', '')
+                                ind = indicators or {}
+                                rsi_val = ind.get('rsi', '-')
+                                score_val = ind.get('total_score', '-')
+                                msg = (
+                                    f"{emoji} <b>{side_text} Açıldı</b>\n"
+                                    f"━━━━━━━━━━━━━━━\n"
+                                    f"🪙 Coin: <b>{coin}/USDT</b>\n"
+                                    f"💰 Giriş: <b>${pos['entry']:,.2f}</b>\n"
+                                    f"⚡ Kaldıraç: <b>{leverage}x</b>\n"
+                                    f"🎯 TP: <b>${tp:,.2f}</b>\n"
+                                    f"🛑 SL: <b>${sl:,.2f}</b>\n"
+                                    f"━━━━━━━━━━━━━━━\n"
+                                    f"📊 Skor: {score_val} | RSI: {rsi_val}\n"
+                                    f"📝 {reason}"
+                                )
+                                send_telegram(msg)
+
+                time.sleep(loop_interval)
 
             except Exception as e:
                 print(f"[AI Bot] Error: {e}")
@@ -1032,17 +1046,19 @@ class PaperTradingState:
         
         # API 1: Binance.US (ABD versiyonu, farklı IP blokları)
         try:
-            url = 'https://api.binance.us/api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]'
+            symbols_json = json.dumps(list(AITradingBot.SYMBOLS))
+            url = f'https://api.binance.us/api/v3/ticker/24hr?symbols={symbols_json}'
             req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with request.urlopen(req, timeout=8) as response:
                 data = json.loads(response.read().decode())
                 with self.lock:
                     for item in data:
                         symbol = item['symbol']
-                        self.prices[symbol] = {
-                            "price": float(item['lastPrice']),
-                            "change": float(item['priceChangePercent'])
-                        }
+                        if symbol in AITradingBot.SYMBOL_MAP:
+                            self.prices[symbol] = {
+                                "price": float(item['lastPrice']),
+                                "change": float(item['priceChangePercent'])
+                            }
                     self.update_position_pnl()
                     print("[Price] Binance.US OK")
                     return
@@ -1057,14 +1073,11 @@ class PaperTradingState:
                 data = json.loads(response.read().decode())
                 tickers = {t['symbol']: t for t in data['data']['ticker']}
                 with self.lock:
-                    if 'BTC-USDT' in tickers:
-                        self.prices["BTCUSDT"] = {"price": float(tickers['BTC-USDT']['last']), "change": float(tickers['BTC-USDT']['changeRate']) * 100}
-                    if 'ETH-USDT' in tickers:
-                        self.prices["ETHUSDT"] = {"price": float(tickers['ETH-USDT']['last']), "change": float(tickers['ETH-USDT']['changeRate']) * 100}
-                    if 'SOL-USDT' in tickers:
-                        self.prices["SOLUSDT"] = {"price": float(tickers['SOL-USDT']['last']), "change": float(tickers['SOL-USDT']['changeRate']) * 100}
-                    if 'XRP-USDT' in tickers:
-                        self.prices["XRPUSDT"] = {"price": float(tickers['XRP-USDT']['last']), "change": float(tickers['XRP-USDT']['changeRate']) * 100}
+                    for symbol in AITradingBot.SYMBOLS:
+                        coin = AITradingBot.SYMBOL_MAP[symbol]
+                        kucoin_sym = f"{coin}-USDT"
+                        if kucoin_sym in tickers:
+                            self.prices[symbol] = {"price": float(tickers[kucoin_sym]['last']), "change": float(tickers[kucoin_sym]['changeRate']) * 100}
                     self.update_position_pnl()
                     print("[Price] KuCoin OK")
                     return
@@ -1073,15 +1086,17 @@ class PaperTradingState:
         
         # API 3: CoinGecko (proxy üzerinden)
         try:
-            url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true'
+            ids_str = ",".join(AITradingBot.COINGECKO_IDS[AITradingBot.SYMBOL_MAP[s]] for s in AITradingBot.SYMBOLS if AITradingBot.SYMBOL_MAP[s] in AITradingBot.COINGECKO_IDS)
+            url = f'https://api.coingecko.com/api/v3/simple/price?ids={ids_str}&vs_currencies=usd&include_24hr_change=true'
             req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
             with request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode())
                 with self.lock:
-                    self.prices["BTCUSDT"] = {"price": float(data['bitcoin']['usd']), "change": float(data['bitcoin'].get('usd_24h_change', 0))}
-                    self.prices["ETHUSDT"] = {"price": float(data['ethereum']['usd']), "change": float(data['ethereum'].get('usd_24h_change', 0))}
-                    self.prices["SOLUSDT"] = {"price": float(data['solana']['usd']), "change": float(data['solana'].get('usd_24h_change', 0))}
-                    self.prices["XRPUSDT"] = {"price": float(data['ripple']['usd']), "change": float(data['ripple'].get('usd_24h_change', 0))}
+                    for symbol in AITradingBot.SYMBOLS:
+                        coin = AITradingBot.SYMBOL_MAP[symbol]
+                        coin_id = AITradingBot.COINGECKO_IDS.get(coin)
+                        if coin_id and coin_id in data:
+                            self.prices[symbol] = {"price": float(data[coin_id]['usd']), "change": float(data[coin_id].get('usd_24h_change', 0))}
                     self.update_position_pnl()
                     print("[Price] CoinGecko OK")
                     return
@@ -1090,16 +1105,17 @@ class PaperTradingState:
         
         # API 4: CryptoCompare
         try:
-            url = 'https://min-api.cryptocompare.com/data/pricemultifull?fsyms=BTC,ETH,SOL,XRP&tsyms=USD'
+            coins_str = ",".join(AITradingBot.SYMBOL_MAP[s] for s in AITradingBot.SYMBOLS)
+            url = f'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={coins_str}&tsyms=USD'
             req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with request.urlopen(req, timeout=8) as response:
                 data = json.loads(response.read().decode())
                 raw = data['RAW']
                 with self.lock:
-                    self.prices["BTCUSDT"] = {"price": float(raw['BTC']['USD']['PRICE']), "change": float(raw['BTC']['USD'].get('CHANGEPCT24HOUR', 0))}
-                    self.prices["ETHUSDT"] = {"price": float(raw['ETH']['USD']['PRICE']), "change": float(raw['ETH']['USD'].get('CHANGEPCT24HOUR', 0))}
-                    self.prices["SOLUSDT"] = {"price": float(raw['SOL']['USD']['PRICE']), "change": float(raw['SOL']['USD'].get('CHANGEPCT24HOUR', 0))}
-                    self.prices["XRPUSDT"] = {"price": float(raw['XRP']['USD']['PRICE']), "change": float(raw['XRP']['USD'].get('CHANGEPCT24HOUR', 0))}
+                    for symbol in AITradingBot.SYMBOLS:
+                        coin = AITradingBot.SYMBOL_MAP[symbol]
+                        if coin in raw and 'USD' in raw[coin]:
+                            self.prices[symbol] = {"price": float(raw[coin]['USD']['PRICE']), "change": float(raw[coin]['USD'].get('CHANGEPCT24HOUR', 0))}
                     self.update_position_pnl()
                     print("[Price] CryptoCompare OK")
                     return
@@ -1175,6 +1191,7 @@ class PaperTradingState:
                 "margin": amount,
                 "pnl": 0.0,
                 "open_time": datetime.now(TR_TZ).strftime("%H:%M:%S"),
+                "open_timestamp": time.time(),
                 "dynamic_tp_pct": round(dynamic_tp_pct, 1),
                 "dynamic_sl_pct": round(dynamic_sl_pct, 1),
             }
