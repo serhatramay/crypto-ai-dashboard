@@ -274,12 +274,16 @@ body {
     color: var(--text-muted);
 }
 
-/* Dashboard Grid */
-.dashboard-grid {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 20px;
+/* Prices Grid */
+.prices-card {
     margin-bottom: 24px;
+}
+
+.prices-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0;
+    padding: 8px;
 }
 
 /* Cards */
@@ -316,15 +320,11 @@ body {
     50% { opacity: 0.5; }
 }
 
-.prices-list {
-    padding: 12px;
-}
-
 .price-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px;
+    padding: 14px 16px;
     border-radius: 8px;
     transition: background 0.2s;
 }
@@ -340,17 +340,19 @@ body {
 }
 
 .price-icon {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 15px;
+    font-weight: 700;
 }
 
 .price-name {
     font-weight: 600;
+    font-size: 14px;
 }
 
 .price-value {
@@ -359,7 +361,7 @@ body {
 
 .price-current {
     font-family: var(--font-mono);
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
 }
 
@@ -376,10 +378,6 @@ body {
     color: var(--accent-danger);
 }
 
-/* Chart */
-.chart-container {
-    padding: 16px;
-}
 
 /* Trades Table */
 .trades-card {
@@ -704,19 +702,19 @@ body {
     .stats-grid {
         grid-template-columns: repeat(2, 1fr);
     }
-    
-    .dashboard-grid {
-        grid-template-columns: 1fr;
+
+    .prices-grid {
+        grid-template-columns: repeat(3, 1fr);
     }
-    
+
     .trading-layout {
         grid-template-columns: 1fr;
     }
-    
+
     .models-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .analytics-grid {
         grid-template-columns: 1fr;
     }
@@ -728,15 +726,19 @@ body {
         height: auto;
         position: relative;
     }
-    
+
     .main {
         margin-left: 0;
     }
-    
+
     .stats-grid {
         grid-template-columns: 1fr;
     }
-    
+
+    .prices-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
     .header {
         flex-direction: column;
         gap: 16px;

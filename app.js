@@ -19,8 +19,6 @@ const elements = {
     pnl: document.getElementById('pnl'),
     positions: document.getElementById('positions'),
     winRate: document.getElementById('win-rate'),
-    chartSymbol: document.getElementById('chart-symbol'),
-    tradingviewChart: document.getElementById('tradingview-chart'),
     startBotBtn: document.getElementById('start-bot-btn'),
     paperModeBtn: document.getElementById('paper-mode-btn')
 };
@@ -29,7 +27,6 @@ const elements = {
 document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
     initPriceFeed();
-    initChart();
     initTrading();
     initModels();
     loadInitialData();
@@ -219,20 +216,23 @@ function renderTrades() {
 }
 
 function renderPrices() {
-    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT', 'MATICUSDT'];
     const icons = {
-        'BTCUSDT': '₿',
-        'ETHUSDT': 'Ξ',
-        'SOLUSDT': '◎',
-        'XRPUSDT': '✕'
+        'BTCUSDT': '₿', 'ETHUSDT': 'Ξ', 'SOLUSDT': '◎', 'XRPUSDT': '✕',
+        'DOGEUSDT': 'Ð', 'ADAUSDT': '₳', 'AVAXUSDT': 'A', 'LINKUSDT': '⬡',
+        'DOTUSDT': '●', 'MATICUSDT': '⬡'
     };
     const names = {
-        'BTCUSDT': 'Bitcoin',
-        'ETHUSDT': 'Ethereum',
-        'SOLUSDT': 'Solana',
-        'XRPUSDT': 'XRP'
+        'BTCUSDT': 'Bitcoin', 'ETHUSDT': 'Ethereum', 'SOLUSDT': 'Solana', 'XRPUSDT': 'XRP',
+        'DOGEUSDT': 'Dogecoin', 'ADAUSDT': 'Cardano', 'AVAXUSDT': 'Avalanche', 'LINKUSDT': 'Chainlink',
+        'DOTUSDT': 'Polkadot', 'MATICUSDT': 'Polygon'
     };
-    
+    const colors = {
+        'BTCUSDT': '#f7931a', 'ETHUSDT': '#627eea', 'SOLUSDT': '#9945ff', 'XRPUSDT': '#00aae4',
+        'DOGEUSDT': '#c2a633', 'ADAUSDT': '#0033ad', 'AVAXUSDT': '#e84142', 'LINKUSDT': '#2a5ada',
+        'DOTUSDT': '#e6007a', 'MATICUSDT': '#8247e5'
+    };
+
     let html = '';
     symbols.forEach(symbol => {
         const data = state.prices[symbol];
@@ -240,11 +240,11 @@ function renderPrices() {
         const change = data ? data.change : 0;
         const changeClass = change >= 0 ? 'up' : 'down';
         const changeSign = change >= 0 ? '+' : '';
-        
+
         html += `
             <div class="price-item" data-symbol="${symbol}">
                 <div class="price-symbol">
-                    <div class="price-icon">${icons[symbol]}</div>
+                    <div class="price-icon" style="background: ${colors[symbol]}20; color: ${colors[symbol]};">${icons[symbol]}</div>
                     <div>
                         <div class="price-name">${names[symbol]}</div>
                         <div style="font-size: 11px; color: var(--text-muted);">${symbol.replace('USDT', '/USDT')}</div>
@@ -257,28 +257,12 @@ function renderPrices() {
             </div>
         `;
     });
-    
+
     if (elements.pricesList) {
         elements.pricesList.innerHTML = html;
     }
 }
 
-// Chart
-function initChart() {
-    if (elements.chartSymbol) {
-        elements.chartSymbol.addEventListener('change', (e) => {
-            state.selectedSymbol = e.target.value;
-            updateChart();
-        });
-    }
-}
-
-function updateChart() {
-    if (elements.tradingviewChart) {
-        const symbol = state.selectedSymbol;
-        elements.tradingviewChart.src = `https://www.tradingview.com/widgetembed/?frameElementId=tradingview_chart&symbol=BINANCE:${symbol}&interval=15&theme=dark&style=1&locale=en&toolbar_bg=f1f3f6&enable_publishing=false&hide_top_toolbar=false&hide_legend=false&save_image=false&calendar=false&hide_volume=false`;
-    }
-}
 
 // Trading
 function initTrading() {

@@ -88,36 +88,14 @@
                     </div>
                 </div>
 
-                <!-- Prices & Chart -->
-                <div class="dashboard-grid">
-                    <!-- Live Prices -->
-                    <div class="card prices-card">
-                        <div class="card-header">
-                            <h3>Live Prices</h3>
-                            <span class="live-indicator">● LIVE</span>
-                        </div>
-                        <div class="prices-list" id="prices-list">
-                            <!-- Prices injected by JS -->
-                        </div>
+                <!-- Live Prices -->
+                <div class="card prices-card">
+                    <div class="card-header">
+                        <h3>Live Prices</h3>
+                        <span class="live-indicator">● LIVE</span>
                     </div>
-
-                    <!-- TradingView Chart -->
-                    <div class="card chart-card">
-                        <div class="card-header">
-                            <h3>Market Chart</h3>
-                            <select id="chart-symbol">
-                                <option value="BTCUSDT">BTC/USDT</option>
-                                <option value="ETHUSDT">ETH/USDT</option>
-                                <option value="SOLUSDT">SOL/USDT</option>
-                                <option value="XRPUSDT">XRP/USDT</option>
-                            </select>
-                        </div>
-                        <div class="chart-container">
-                            <iframe id="tradingview-chart" 
-                                src="https://www.tradingview.com/widgetembed/?frameElementId=tradingview_chart&symbol=BINANCE:BTCUSDT&interval=15&theme=dark&style=1&locale=en&toolbar_bg=f1f3f6&enable_publishing=false&hide_top_toolbar=false&hide_legend=false&save_image=false&calendar=false&hide_volume=false"
-                                width="100%" height="400" frameborder="0" allowtransparency="true" scrolling="no">
-                            </iframe>
-                        </div>
+                    <div class="prices-grid" id="prices-list">
+                        <!-- Prices injected by JS -->
                     </div>
                 </div>
 
@@ -187,6 +165,12 @@
                                     <option value="ETHUSDT">ETH/USDT</option>
                                     <option value="SOLUSDT">SOL/USDT</option>
                                     <option value="XRPUSDT">XRP/USDT</option>
+                                    <option value="DOGEUSDT">DOGE/USDT</option>
+                                    <option value="ADAUSDT">ADA/USDT</option>
+                                    <option value="AVAXUSDT">AVAX/USDT</option>
+                                    <option value="LINKUSDT">LINK/USDT</option>
+                                    <option value="DOTUSDT">DOT/USDT</option>
+                                    <option value="MATICUSDT">MATIC/USDT</option>
                                 </select>
                             </div>
                             <div class="form-group">
