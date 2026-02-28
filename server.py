@@ -647,6 +647,10 @@ class AITradingBot:
         self.price_history = {s: [] for s in self.SYMBOLS}
         # Fear & Greed Index
         self.fear_greed = {"value": 50, "label": "Neutral"}
+        # Sentiment verileri
+        self.news_sentiment = {"score": 0, "count": 0, "headlines": []}
+        self.whale_sentiment = {"score": 0, "inflow_usd": 0, "outflow_usd": 0, "tx_count": 0}
+        self.geo_sentiment = {"score": 0, "keywords_found": []}
         self.data_ready = False
         # Soğuma süresi: coin başına son kapanış zamanı
         self.cooldown_until = {s: 0 for s in self.SYMBOLS}
@@ -730,6 +734,139 @@ class AITradingBot:
                 print(f"[AI Bot] Fear & Greed: {self.fear_greed['value']} ({self.fear_greed['label']})")
         except Exception as e:
             print(f"[AI Bot] Fear & Greed fetch failed: {e}")
+
+    # Jeopolitik keyword sözlüğü
+    GEO_KEYWORDS = {
+        "very_bearish": ["war", "invasion", "nuclear", "default", "collapse", "missile", "bomb", "attack on"],
+        "bearish": ["sanctions", "crisis", "recession", "tariff", "ban", "restrict", "conflict",
+                     "escalation", "shutdown", "hack", "exploit", "liquidat", "dump", "panic", "fear"],
+        "bullish": ["peace", "deal", "ceasefire", "recovery", "growth", "stimulus", "rate cut",
+                     "easing", "rally", "surge", "bullish", "adoption", "etf approv", "partnership"],
+        "very_bullish": ["moon", "all-time high", "ath", "breakout", "massive rally"]
+    }
+
+    def fetch_crypto_news(self):
+        """CryptoPanic API'den kripto haber sentimenti çek"""
+        api_key = os.environ.get('CRYPTOPANIC_API_KEY', '')
+        if not api_key:
+            return
+        try:
+            url = f'https://cryptopanic.com/api/v1/posts/?auth_token={api_key}&public=true&currencies=BTC,ETH,SOL&kind=news'
+            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                results = data.get('results', [])[:20]  # Son 20 haber
+
+                if not results:
+                    return
+
+                # Haber sentiment skoru (votes bazlı)
+                total_bullish = 0
+                total_bearish = 0
+                headlines = []
+                geo_score = 0
+                geo_keywords = []
+
+                for post in results:
+                    votes = post.get('votes', {})
+                    bullish = votes.get('positive', 0) + votes.get('liked', 0)
+                    bearish = votes.get('negative', 0) + votes.get('disliked', 0)
+                    total_bullish += bullish
+                    total_bearish += bearish
+                    headlines.append(post.get('title', '')[:80])
+
+                    # Jeopolitik keyword taraması
+                    text = (post.get('title', '') + ' ' + post.get('description', '')).lower() if post.get('description') else post.get('title', '').lower()
+                    for kw in self.GEO_KEYWORDS["very_bearish"]:
+                        if kw in text:
+                            geo_score -= 2
+                            if kw not in geo_keywords:
+                                geo_keywords.append(kw)
+                    for kw in self.GEO_KEYWORDS["bearish"]:
+                        if kw in text:
+                            geo_score -= 1
+                            if kw not in geo_keywords:
+                                geo_keywords.append(kw)
+                    for kw in self.GEO_KEYWORDS["bullish"]:
+                        if kw in text:
+                            geo_score += 1
+                            if kw not in geo_keywords:
+                                geo_keywords.append(kw)
+                    for kw in self.GEO_KEYWORDS["very_bullish"]:
+                        if kw in text:
+                            geo_score += 2
+                            if kw not in geo_keywords:
+                                geo_keywords.append(kw)
+
+                # News sentiment: -1 ile +1 arası
+                total_votes = total_bullish + total_bearish
+                news_score = (total_bullish - total_bearish) / total_votes if total_votes > 0 else 0
+
+                self.news_sentiment = {
+                    "score": round(news_score, 2),
+                    "count": len(results),
+                    "headlines": headlines[:5]
+                }
+
+                # Geo sentiment: normalize et (-1 ile +1 arası)
+                max_geo = len(results) * 2  # Maksimum olası skor
+                geo_normalized = max(-1, min(1, geo_score / max_geo)) if max_geo > 0 else 0
+                self.geo_sentiment = {
+                    "score": round(geo_normalized, 2),
+                    "keywords_found": geo_keywords[:10]
+                }
+
+                print(f"[AI Bot] News Sentiment: {self.news_sentiment['score']} ({self.news_sentiment['count']} haber)")
+                print(f"[AI Bot] Geo Sentiment: {self.geo_sentiment['score']} (keywords: {', '.join(geo_keywords[:5])})")
+        except Exception as e:
+            print(f"[AI Bot] CryptoPanic fetch failed: {e}")
+
+    def fetch_whale_alerts(self):
+        """Whale Alert API'den büyük transfer verisi çek"""
+        api_key = os.environ.get('WHALE_ALERT_API_KEY', '')
+        if not api_key:
+            return
+        try:
+            # Son 1 saatteki $500K+ transferler
+            start_time = int(time.time()) - 3600
+            url = f'https://api.whale-alert.io/v1/transactions?api_key={api_key}&start={start_time}&min_value=500000'
+            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                transactions = data.get('transactions', [])
+
+                inflow_usd = 0
+                outflow_usd = 0
+                tx_count = len(transactions)
+
+                for tx in transactions:
+                    # Sadece BTC, ETH, SOL filtrele
+                    symbol = tx.get('symbol', '').lower()
+                    if symbol not in ['btc', 'eth', 'sol', 'usdt', 'usdc']:
+                        continue
+
+                    amount_usd = tx.get('amount_usd', 0)
+                    from_type = tx.get('from', {}).get('owner_type', '').lower()
+                    to_type = tx.get('to', {}).get('owner_type', '').lower()
+
+                    if from_type != 'exchange' and to_type == 'exchange':
+                        inflow_usd += amount_usd  # Borsaya giriş = satış baskısı
+                    elif from_type == 'exchange' and to_type != 'exchange':
+                        outflow_usd += amount_usd  # Borsadan çıkış = bullish
+
+                # Skor: outflow > inflow = bullish, inflow > outflow = bearish
+                total = inflow_usd + outflow_usd
+                whale_score = (outflow_usd - inflow_usd) / total if total > 0 else 0
+
+                self.whale_sentiment = {
+                    "score": round(whale_score, 2),
+                    "inflow_usd": round(inflow_usd),
+                    "outflow_usd": round(outflow_usd),
+                    "tx_count": tx_count
+                }
+                print(f"[AI Bot] Whale Flow: score={self.whale_sentiment['score']} | in=${inflow_usd:,.0f} out=${outflow_usd:,.0f} ({tx_count} tx)")
+        except Exception as e:
+            print(f"[AI Bot] Whale Alert fetch failed: {e}")
 
     def get_prices(self, symbol):
         """Saatlik + kısa vadeli fiyatları birleştir"""
@@ -976,13 +1113,26 @@ class AITradingBot:
         else:
             scores['momentum_24h'] = 0
 
+        # 14. Haber Sentimenti (CryptoPanic)
+        news_score = self.news_sentiment.get('score', 0)  # -1 ile +1 arası
+        scores['news_sentiment'] = round(news_score * 80)  # -80 ile +80 arası
+
+        # 15. Balina Akışı (Whale Alert)
+        whale_score = self.whale_sentiment.get('score', 0)  # -1 ile +1 arası
+        scores['whale_flow'] = round(whale_score * 70)  # -70 ile +70 arası
+
+        # 16. Jeopolitik Sentiment (keyword analizi)
+        geo_score = self.geo_sentiment.get('score', 0)  # -1 ile +1 arası
+        scores['geopolitical'] = round(geo_score * 90)  # -90 ile +90 arası
+
         # === AĞIRLIKLI TOPLAM SKOR ===
         weights = {
-            'rsi': 0.08, 'macd': 0.08, 'bollinger': 0.06,
-            'ema_cross': 0.10, 'trend': 0.10, 'sr': 0.06,
-            'fear_greed': 0.08, 'volume': 0.04, 'fvg': 0.06,
-            'divergence': 0.06, 'order_block': 0.06, 'liquidity': 0.06,
-            'momentum_24h': 0.16
+            'rsi': 0.06, 'macd': 0.06, 'bollinger': 0.04,
+            'ema_cross': 0.08, 'trend': 0.08, 'sr': 0.04,
+            'fear_greed': 0.06, 'volume': 0.03, 'fvg': 0.04,
+            'divergence': 0.04, 'order_block': 0.04, 'liquidity': 0.04,
+            'momentum_24h': 0.11,
+            'news_sentiment': 0.10, 'whale_flow': 0.08, 'geopolitical': 0.10
         }
         total_score = sum(scores.get(k, 0) * w for k, w in weights.items())
         total_score *= vol_multiplier  # Hacim çarpanı uygula
@@ -1074,6 +1224,9 @@ class AITradingBot:
             "order_block": round(ob_score, 1),
             "liquidity_sweep": round(liq_score, 1),
             "htf_trend": htf_trend,
+            "news_sentiment": self.news_sentiment,
+            "whale_flow": self.whale_sentiment,
+            "geopolitical": self.geo_sentiment,
             "scores": {k: round(v, 1) for k, v in scores.items()},
             "total_score": round(total_score, 1)
         }
@@ -1103,6 +1256,15 @@ class AITradingBot:
         if abs(scores.get('liquidity', 0)) > 20:
             liq_dir = "sweep↑" if scores['liquidity'] > 0 else "sweep↓"
             reasons.append(f"LIQ:{liq_dir}")
+        if abs(scores.get('news_sentiment', 0)) > 15:
+            news_dir = "bullish" if scores['news_sentiment'] > 0 else "bearish"
+            reasons.append(f"NEWS:{news_dir}")
+        if abs(scores.get('whale_flow', 0)) > 15:
+            whale_dir = "çıkış" if scores['whale_flow'] > 0 else "giriş"
+            reasons.append(f"WHALE:{whale_dir}")
+        if abs(scores.get('geopolitical', 0)) > 15:
+            geo_dir = "olumlu" if scores['geopolitical'] > 0 else "risk"
+            reasons.append(f"GEO:{geo_dir}")
 
         reason_text = f"Skor:{total_score:.0f} | " + " + ".join(reasons) if reasons else f"Skor:{total_score:.0f} | Nötr"
 
@@ -1205,8 +1367,11 @@ class AITradingBot:
         # İlk başta tarihsel veri çek
         self.fetch_historical_candles()
         self.fetch_fear_greed()
+        self.fetch_crypto_news()
+        self.fetch_whale_alerts()
 
         fg_timer = 0
+        sentiment_timer = 0
         candle_timer = 0
         analysis_timer = 0
         retry_history = 0
@@ -1218,11 +1383,16 @@ class AITradingBot:
             try:
                 self.state.update_prices()
 
-                # Fear & Greed her 30 dakikada güncelle (60 * 30sn = 30dk)
+                # Fear & Greed + Sentiment her 30 dakikada güncelle (60 * 30sn = 30dk)
                 fg_timer += 1
+                sentiment_timer += 1
                 if fg_timer >= 60:
                     self.fetch_fear_greed()
                     fg_timer = 0
+                if sentiment_timer >= 60:
+                    self.fetch_crypto_news()
+                    self.fetch_whale_alerts()
+                    sentiment_timer = 0
 
                 # Tarihsel veri yoksa 5 dakikada bir tekrar dene
                 if not self.data_ready:
