@@ -962,10 +962,10 @@ class AITradingBot:
 
         # === AĞIRLIKLI TOPLAM SKOR ===
         weights = {
-            'rsi': 0.08, 'macd': 0.12, 'bollinger': 0.08,
-            'ema_cross': 0.08, 'trend': 0.06, 'sr': 0.06,
-            'fear_greed': 0.06, 'volume': 0.04, 'fvg': 0.14,
-            'divergence': 0.10, 'order_block': 0.10, 'liquidity': 0.08
+            'rsi': 0.10, 'macd': 0.10, 'bollinger': 0.08,
+            'ema_cross': 0.10, 'trend': 0.10, 'sr': 0.08,
+            'fear_greed': 0.08, 'volume': 0.04, 'fvg': 0.08,
+            'divergence': 0.08, 'order_block': 0.08, 'liquidity': 0.08
         }
         total_score = sum(scores.get(k, 0) * w for k, w in weights.items())
         total_score *= vol_multiplier  # Hacim çarpanı uygula
@@ -1013,9 +1013,9 @@ class AITradingBot:
 
         # === KARAR ===
         min_agreement = 3  # En az 3 gösterge uyumu
-        if total_score > 35 and bullish_count >= min_agreement and not trend_conflict:
+        if total_score > 25 and bullish_count >= min_agreement and not trend_conflict:
             signal = "buy"
-        elif total_score < -35 and bearish_count >= min_agreement and not trend_conflict:
+        elif total_score < -25 and bearish_count >= min_agreement and not trend_conflict:
             signal = "sell"
         else:
             signal = "hold"
