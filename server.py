@@ -928,15 +928,15 @@ class AITradingBot:
             elif dist_pct < 2:
                 scores['sr'] = -30
 
-        # 7. Fear & Greed Index (ağırlık: %10)
+        # 7. Fear & Greed Index (trend doğrulayıcı - aşırı korku=SHORT güçlenir, aşırı açgözlülük=LONG güçlenir)
         if fg_value < 20:
-            scores['fear_greed'] = 70  # Aşırı korku = alım fırsatı
+            scores['fear_greed'] = -70  # Aşırı korku = piyasa çöküyor, SHORT güçlen
         elif fg_value < 35:
-            scores['fear_greed'] = 35
-        elif fg_value > 80:
-            scores['fear_greed'] = -70  # Aşırı açgözlülük = satım
-        elif fg_value > 65:
             scores['fear_greed'] = -35
+        elif fg_value > 80:
+            scores['fear_greed'] = 70  # Aşırı açgözlülük = piyasa coşmuş, LONG güçlen
+        elif fg_value > 65:
+            scores['fear_greed'] = 35
         else:
             scores['fear_greed'] = 0
 
