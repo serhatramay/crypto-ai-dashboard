@@ -2,7 +2,7 @@ name: Keep Alive
 
 on:
   schedule:
-    - cron: '*/14 * * * *'  # Her 14 dakikada bir ping at
+    - cron: '*/12 * * * *'  # Her 12 dakikada bir ping at
   workflow_dispatch:  # Manuel tetikleme
 
 jobs:
