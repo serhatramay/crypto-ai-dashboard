@@ -251,8 +251,8 @@ def send_telegram(message):
 # AI Trading Configuration
 AI_CONFIG = {
     "max_positions": 5,
-    "trade_amount": 100,
-    "check_interval": 30,  # 30 saniye
+    "trade_amount": 500,
+    "check_interval": 300,  # 5 dakika
     "stop_loss_pct": 5,
     "take_profit_pct": 10,
 }

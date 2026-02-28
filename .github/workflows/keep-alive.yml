@@ -1,0 +1,14 @@
+name: Keep Alive
+
+on:
+  schedule:
+    - cron: '*/14 * * * *'  # Her 14 dakikada bir ping at
+  workflow_dispatch:  # Manuel tetikleme
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render App
+        run: |
+          curl -sf https://crypto-ai-dashboard-xgon.onrender.com/api/prices || echo "Ping failed, app may be starting up"
