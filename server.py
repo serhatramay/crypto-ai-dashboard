@@ -379,6 +379,85 @@ class TechnicalAnalyzer:
         return sum(true_ranges[-period:]) / period
 
     @staticmethod
+    def fair_value_gaps(candles_ohlc, current_price, lookback=30):
+        """FVG (Fair Value Gap) tespiti - Adil Fiyat Boşluğu
+        3 ardışık mumdan oluşur:
+        - Bullish FVG: Mum1 high < Mum3 low (yukarı boşluk)
+        - Bearish FVG: Mum1 low > Mum3 high (aşağı boşluk)
+        Fiyat genellikle bu boşlukları doldurmak için geri döner.
+        """
+        if len(candles_ohlc) < 3 or current_price <= 0:
+            return [], 0
+
+        fvgs = []
+        start = max(0, len(candles_ohlc) - lookback)
+        for i in range(start + 2, len(candles_ohlc)):
+            c1 = candles_ohlc[i - 2]
+            c3 = candles_ohlc[i]
+
+            # Bullish FVG: Mum1'in high'ı < Mum3'ün low'u
+            if c1['high'] < c3['low']:
+                gap_top = c3['low']
+                gap_bottom = c1['high']
+                gap_pct = (gap_top - gap_bottom) / current_price * 100
+                if gap_pct >= 0.05:  # Çok küçük boşlukları atla
+                    age = len(candles_ohlc) - 1 - i
+                    fvgs.append({
+                        'type': 'bullish',
+                        'top': gap_top,
+                        'bottom': gap_bottom,
+                        'mid': (gap_top + gap_bottom) / 2,
+                        'gap_pct': gap_pct,
+                        'age': age,
+                        'filled': current_price <= gap_top and current_price >= gap_bottom
+                    })
+
+            # Bearish FVG: Mum1'in low'u > Mum3'ün high'ı
+            if c1['low'] > c3['high']:
+                gap_top = c1['low']
+                gap_bottom = c3['high']
+                gap_pct = (gap_top - gap_bottom) / current_price * 100
+                if gap_pct >= 0.05:
+                    age = len(candles_ohlc) - 1 - i
+                    fvgs.append({
+                        'type': 'bearish',
+                        'top': gap_top,
+                        'bottom': gap_bottom,
+                        'mid': (gap_top + gap_bottom) / 2,
+                        'gap_pct': gap_pct,
+                        'age': age,
+                        'filled': current_price >= gap_bottom and current_price <= gap_top
+                    })
+
+        # FVG skoru hesapla
+        fvg_score = 0
+        for fvg in fvgs:
+            age_decay = max(0.3, 1 - fvg['age'] * 0.04)  # Yeni FVG'ler daha önemli
+            gap_strength = min(2.0, fvg['gap_pct'] / 0.2)  # Büyük boşluk = güçlü sinyal
+
+            if fvg['type'] == 'bullish':
+                # Fiyat bullish FVG'nin içinde = güçlü alım (boşluk dolduruluyor)
+                if fvg['filled']:
+                    fvg_score = max(fvg_score, 85 * age_decay * gap_strength)
+                # Fiyat boşluğa yakın (üstten %0.5 mesafede)
+                elif current_price <= fvg['top'] * 1.005 and current_price > fvg['top']:
+                    fvg_score = max(fvg_score, 50 * age_decay * gap_strength)
+                # Fiyat boşluğun altında (doldurdu ve geçti - tamamlanmış)
+                elif current_price < fvg['bottom']:
+                    pass  # Boşluk aşıldı, sinyal yok
+
+            elif fvg['type'] == 'bearish':
+                if fvg['filled']:
+                    fvg_score = min(fvg_score, -85 * age_decay * gap_strength)
+                elif current_price >= fvg['bottom'] * 0.995 and current_price < fvg['bottom']:
+                    fvg_score = min(fvg_score, -50 * age_decay * gap_strength)
+                elif current_price > fvg['top']:
+                    pass
+
+        fvg_score = max(-100, min(100, fvg_score))
+        return fvgs, fvg_score
+
+    @staticmethod
     def volume_signal(volumes, period=20):
         """Hacim analizi"""
         if len(volumes) < period or not volumes[-1]:
@@ -407,9 +486,11 @@ class AITradingBot:
         self.running = False
         self.thread = None
         self.last_analysis = {}
-        # Saatlik mum verileri (200 mum)
+        # Mum verileri (OHLC + close listesi)
         self.candle_closes = {s: [] for s in self.SYMBOLS}
         self.candle_volumes = {s: [] for s in self.SYMBOLS}
+        self.candles_ohlc = {s: [] for s in self.SYMBOLS}  # [{open, high, low, close}, ...]
+        self.current_candle = {s: None for s in self.SYMBOLS}  # Oluşmakta olan mum
         # Kısa vadeli fiyat (5sn aralıklarla)
         self.price_history = {s: [] for s in self.SYMBOLS}
         # Fear & Greed Index
@@ -451,13 +532,26 @@ class AITradingBot:
                             candles = raw.get('Data', {}).get('Data', [])
                             self.candle_closes[symbol] = [c['close'] for c in candles if c.get('close')]
                             self.candle_volumes[symbol] = [c.get('volumeto', 0) for c in candles]
+                            self.candles_ohlc[symbol] = [
+                                {'open': c['open'], 'high': c['high'], 'low': c['low'], 'close': c['close']}
+                                for c in candles if c.get('close') and c.get('high')
+                            ]
                         elif api_name == "coingecko" and 'prices' in raw:
                             self.candle_closes[symbol] = [p[1] for p in raw['prices']]
                             vols = raw.get('total_volumes', [])
                             self.candle_volumes[symbol] = [v[1] for v in vols] if vols else []
+                            # CoinGecko sadece close veriyor, OHLC oluştur (close=open=high=low)
+                            self.candles_ohlc[symbol] = [
+                                {'open': p[1], 'high': p[1], 'low': p[1], 'close': p[1]}
+                                for p in raw['prices']
+                            ]
                         elif api_name == "binance" and isinstance(raw, list) and len(raw) > 0:
                             self.candle_closes[symbol] = [float(c[4]) for c in raw]
                             self.candle_volumes[symbol] = [float(c[5]) for c in raw]
+                            self.candles_ohlc[symbol] = [
+                                {'open': float(c[1]), 'high': float(c[2]), 'low': float(c[3]), 'close': float(c[4])}
+                                for c in raw
+                            ]
                         if self.candle_closes.get(symbol):
                             print(f"  [OK] {symbol} via {api_name}: {len(self.candle_closes[symbol])} candles")
                             break
@@ -563,6 +657,15 @@ class AITradingBot:
             if momentum != 0:
                 reasons.append(f"Mom:{'↑' if momentum > 0 else '↓'}{abs(momentum):.2f}%")
 
+            # Basit modda da FVG kontrol et
+            ohlc_data = self.candles_ohlc.get(symbol, [])
+            if len(ohlc_data) >= 3:
+                _, basic_fvg_score = TechnicalAnalyzer.fair_value_gaps(ohlc_data, current_price, lookback=20)
+                if abs(basic_fvg_score) > 20:
+                    score += basic_fvg_score * 0.3
+                    fvg_dir = "alım" if basic_fvg_score > 0 else "satım"
+                    reasons.append(f"FVG:{fvg_dir}")
+
             if score > 20:
                 signal, lev = "buy", 15
             elif score < -20:
@@ -584,6 +687,9 @@ class AITradingBot:
         supports, resistances = TechnicalAnalyzer.support_resistance(prices)
         vol_signal, vol_ratio = TechnicalAnalyzer.volume_signal(volumes)
         fg_value = self.fear_greed.get('value', 50)
+        # FVG (Fair Value Gap) hesapla
+        ohlc_data = self.candles_ohlc.get(symbol, [])
+        fvgs, fvg_score = TechnicalAnalyzer.fair_value_gaps(ohlc_data, current_price, lookback=30)
 
         # === SKOR SİSTEMİ (-100 ile +100 arası) ===
         scores = {}
@@ -684,11 +790,14 @@ class AITradingBot:
             vol_multiplier = 0.7
         scores['volume'] = 0  # Hacim tek başına sinyal vermez, çarpan olarak kullanılır
 
+        # 9. FVG - Fair Value Gap (ağırlık: %15)
+        scores['fvg'] = fvg_score
+
         # === AĞIRLIKLI TOPLAM SKOR ===
         weights = {
-            'rsi': 0.15, 'macd': 0.20, 'bollinger': 0.15,
-            'ema_cross': 0.15, 'trend': 0.10, 'sr': 0.10,
-            'fear_greed': 0.10, 'volume': 0.05
+            'rsi': 0.12, 'macd': 0.17, 'bollinger': 0.12,
+            'ema_cross': 0.12, 'trend': 0.08, 'sr': 0.08,
+            'fear_greed': 0.08, 'volume': 0.05, 'fvg': 0.18
         }
         total_score = sum(scores.get(k, 0) * w for k, w in weights.items())
         total_score *= vol_multiplier  # Hacim çarpanı uygula
@@ -745,6 +854,11 @@ class AITradingBot:
             "fear_greed": self.fear_greed,
             "atr": round(atr_value, 4) if atr_value else 0,
             "change_24h": round(change_24h, 2),
+            "fvg": {
+                "score": round(fvg_score, 1),
+                "count": len(fvgs),
+                "active": [{"type": f['type'], "top": round(f['top'], 2), "bottom": round(f['bottom'], 2), "filled": f['filled']} for f in fvgs[-3:]]
+            },
             "scores": {k: round(v, 1) for k, v in scores.items()},
             "total_score": round(total_score, 1)
         }
@@ -763,6 +877,9 @@ class AITradingBot:
             reasons.append(f"F&G:{fg_value}")
         if abs(scores.get('sr', 0)) > 20:
             reasons.append("S/R yakın")
+        if abs(scores.get('fvg', 0)) > 20:
+            fvg_dir = "alım" if scores['fvg'] > 0 else "satım"
+            reasons.append(f"FVG:{fvg_dir}")
 
         reason_text = f"Skor:{total_score:.0f} | " + " + ".join(reasons) if reasons else f"Skor:{total_score:.0f} | Nötr"
 
@@ -892,15 +1009,30 @@ class AITradingBot:
                         self.fetch_historical_candles()
                         retry_history = 0
 
-                # Canlı fiyatlardan 5 dakikalık mum biriktir
+                # Canlı fiyatlardan OHLC mum oluştur (her tick'te güncelle)
+                for sym in self.SYMBOLS:
+                    price = self.state.prices.get(sym, {}).get('price', 0)
+                    if price > 0:
+                        if self.current_candle[sym] is None:
+                            self.current_candle[sym] = {'open': price, 'high': price, 'low': price, 'close': price}
+                        else:
+                            self.current_candle[sym]['high'] = max(self.current_candle[sym]['high'], price)
+                            self.current_candle[sym]['low'] = min(self.current_candle[sym]['low'], price)
+                            self.current_candle[sym]['close'] = price
+
+                # 5 dakikalık mum tamamlandığında kaydet
                 candle_timer += 1
                 if candle_timer >= candle_ticks:
                     for sym in self.SYMBOLS:
-                        live = self.price_history.get(sym, [])
-                        if live:
-                            self.candle_closes[sym].append(live[-1])
+                        if self.current_candle[sym]:
+                            candle = self.current_candle[sym]
+                            self.candle_closes[sym].append(candle['close'])
+                            self.candles_ohlc[sym].append(candle)
                             if len(self.candle_closes[sym]) > 500:
                                 self.candle_closes[sym].pop(0)
+                            if len(self.candles_ohlc[sym]) > 500:
+                                self.candles_ohlc[sym].pop(0)
+                            self.current_candle[sym] = None
                     candle_timer = 0
                     ready_count = sum(1 for v in self.candle_closes.values() if len(v) >= 30)
                     if ready_count >= len(self.SYMBOLS) // 2 and not self.data_ready:
